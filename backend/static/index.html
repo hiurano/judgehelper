@@ -700,14 +700,22 @@ function renderHistory() {
 function makeFilename(entry) {
     const meta = entry.metadata || {};
     const parts = [];
-    if (meta.case_number) parts.push(meta.case_number.replace(/[\\/:*?"<>|]/g, '_'));
-    if (meta.defendant)   parts.push(meta.defendant.split(' ')[0]);
-    if (parts.length === 0) {
-        const ts = new Date(entry.timestamp || Date.now()).toISOString().slice(0, 16).replace(/[:T]/g, '-');
-        parts.push(`protokol_${ts}`);
+    
+    const defendant = (meta.defendant || '').trim().split(' ')[0];
+    if (defendant) {
+        parts.push(defendant.replace(/[\\/:*?"<>|]/g, '_'));
     } else {
-        parts.unshift('protokol');
+        parts.push('Без_имени');
     }
+    
+    const dateObj = new Date(entry.timestamp || Date.now());
+    const yyyy = dateObj.getFullYear();
+    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const dd = String(dateObj.getDate()).padStart(2, '0');
+    parts.push(`${yyyy}-${mm}-${dd}`);
+    
+    parts.push('протокол');
+    
     return parts.join('_') + '.docx';
 }
 function openHistoryEntry(entry) {
@@ -788,15 +796,29 @@ function updateHistoryDraft(jobId, newDraft) {
     }, 1000);
 }
 
+function cleanSurname(name) {
+    const baseName = name.substring(0, name.lastIndexOf('.')) || name;
+    const match = baseName.trim().match(/^[a-zA-Zа-яА-ЯёЁ]+/);
+    if (match) {
+        const word = match[0];
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }
+    return baseName;
+}
+
 function addFilesToQueue(files, opts = {}) {
     const meta = getMetadataFromForm();
     for (const f of Array.from(files)) {
+        const fileMeta = { ...meta };
+        if (!fileMeta.defendant) {
+            fileMeta.defendant = cleanSurname(f.name);
+        }
         const item = {
             key: 'q_' + Math.random().toString(36).slice(2, 10),
             file: f,
             filename: f.name,
             sizeMB: (f.size / 1024 / 1024).toFixed(1),
-            metadata: { ...meta },
+            metadata: fileMeta,
             idbId: opts.idbId || null,  // set for browser-recorded blobs
             status: 'staged',  // NOT auto-processed — user must click "Расшифровать"
             progress: 0,
