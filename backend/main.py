@@ -702,7 +702,7 @@ async def _submit_to_assemblyai(temp_id: str, audio: bytes, filename: str):
                 "language_code": "ru",
                 "speaker_labels": True,
                 "speakers_expected": 3,
-                "speech_model": "best",
+                "speech_models": ["universal-2"],
                 "punctuate": True,
                 "format_text": True,
                 "word_boost": dynamic_boost,
