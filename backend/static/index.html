@@ -807,6 +807,15 @@ function addFilesToQueue(files, opts = {}) {
     renderQueue();
 }
 
+function checkQueueScheduler() {
+    const active = queue.some((q) => q.status === 'uploading' || q.status === 'processing');
+    if (active) return;
+    const next = queue.find((q) => q.status === 'queued');
+    if (next) {
+        processQueueItem(next);
+    }
+}
+
 async function processQueueItem(item) {
     item.status = 'uploading';
     item.progress = 0;
@@ -827,12 +836,14 @@ async function processQueueItem(item) {
             item.status = 'auth_required';
             item.error = err.message;
             renderQueue();
+            checkQueueScheduler();
             releaseWakeLockIfDone();
             return;
         }
         item.status = 'error';
         item.error = err.message || String(err);
         renderQueue();
+        checkQueueScheduler();
         releaseWakeLockIfDone();
     }
 }
@@ -851,6 +862,7 @@ function pollQueueItem(item) {
                     item.status = 'error';
                     item.error = `Сервер не отвечает (HTTP ${resp.status})`;
                     renderQueue();
+                    checkQueueScheduler();
                     releaseWakeLockIfDone();
                 }
                 return;
@@ -879,6 +891,7 @@ function pollQueueItem(item) {
                     item.idbId = null;
                 }
                 renderQueue();
+                checkQueueScheduler();
                 releaseWakeLockIfDone();
             } else if (data.status === 'transcribed') {
                 // Part of a multi-part session — transcribed but not drafted.
@@ -888,12 +901,14 @@ function pollQueueItem(item) {
                 item.transcript = data.transcript;
                 item.duration_min = data.duration_min;
                 renderQueue();
+                checkQueueScheduler();
                 releaseWakeLockIfDone();
             } else if (data.status === 'error') {
                 clearInterval(item.pollTimer);
                 item.status = 'error';
                 item.error = data.error || 'Неизвестная ошибка';
                 renderQueue();
+                checkQueueScheduler();
                 releaseWakeLockIfDone();
             } else {
                 item.phase = data.phase || 'processing';
@@ -913,6 +928,7 @@ function pollQueueItem(item) {
                 item.status = 'error';
                 item.error = 'Не удалось получить статус.';
                 renderQueue();
+                checkQueueScheduler();
                 releaseWakeLockIfDone();
             }
         }
@@ -1065,7 +1081,11 @@ function renderStagedBar() {
     goBtn.className = 'big';
     goBtn.textContent = staged.length > 1 ? 'Расшифровать всё' : 'Расшифровать';
     goBtn.addEventListener('click', () => {
-        staged.forEach((s) => processQueueItem(s));
+        staged.forEach((s) => {
+            s.status = 'queued';
+        });
+        renderQueue();
+        checkQueueScheduler();
     });
     bar.appendChild(goBtn);
 }
@@ -1342,7 +1362,9 @@ function renderQueueItem(item) {
                 }
             }
             sessionExpired = false;
-            processQueueItem(item);
+            item.status = 'queued';
+            renderQueue();
+            checkQueueScheduler();
         });
         actions.appendChild(retryBtn);
     }
