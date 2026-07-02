@@ -1,0 +1,1789 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Помощник секретаря</title>
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#2563eb">
+
+    <!-- iOS-specific -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Протокол">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/static/icon-192.png">
+
+    <style>
+        :root {
+            --bg: #f4f4f5;
+            --panel: #ffffff;
+            --text: #18181b;
+            --muted: #71717a;
+            --accent: #2563eb;
+            --accent-dark: #1e40af;
+            --error: #dc2626;
+            --error-bg: #fef2f2;
+            --warn-bg: #fef3c7;
+            --warn-border: #fcd34d;
+            --border: #e4e4e7;
+            --rec: #dc2626;
+            --done-bg: #ecfdf5;
+            --done-border: #6ee7b7;
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body { overscroll-behavior-y: contain; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, sans-serif;
+            margin: 0; padding: 1.5rem 1rem;
+            padding-top: max(1.5rem, env(safe-area-inset-top));
+            padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+            background: var(--bg); color: var(--text);
+            line-height: 1.5;
+            -webkit-text-size-adjust: 100%;
+        }
+        .container { max-width: 760px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+        .subtitle { color: var(--muted); margin: 0 0 1.25rem; font-size: 0.95rem; }
+        .card {
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem;
+        }
+
+        /* Drop zone */
+        #drop-zone {
+            border: 2px dashed var(--border); border-radius: 8px;
+            padding: 1.5rem 1rem; text-align: center; cursor: pointer;
+            transition: border-color 0.2s, background-color 0.2s;
+        }
+        #drop-zone.dragover { border-color: var(--accent); background: #eff6ff; }
+        #drop-zone p { margin: 0 0 0.25rem; color: var(--muted); font-size: 0.95rem; }
+        #drop-zone .hint { font-size: 0.85rem; }
+        #file-input { display: none; }
+
+        /* Buttons */
+        button {
+            background: var(--accent); color: white; border: none;
+            padding: 0.875rem 1.25rem; border-radius: 8px;
+            font-size: 1rem; cursor: pointer; font-weight: 500;
+            transition: background-color 0.15s, transform 0.05s;
+            min-height: 48px;
+        }
+        button:active:not(:disabled) { transform: scale(0.98); }
+        button:hover:not(:disabled) { background: var(--accent-dark); }
+        button:disabled { background: var(--muted); cursor: not-allowed; opacity: 0.6; }
+        button.secondary { background: white; color: var(--text); border: 1px solid var(--border); }
+        button.secondary:hover:not(:disabled) { background: #f9fafb; }
+        button.danger { background: var(--rec); }
+        button.danger:hover:not(:disabled) { background: #b91c1c; }
+        button.small { padding: 0.5rem 0.875rem; font-size: 0.875rem; min-height: 36px; }
+        button.big {
+            font-size: 1.125rem; padding: 1rem 1.5rem; width: 100%;
+            display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+        }
+
+        /* Recording UI */
+        .rec-indicator {
+            display: inline-block; width: 12px; height: 12px;
+            background: var(--rec); border-radius: 50%; margin-right: 0.5rem;
+            animation: pulse 1s ease-in-out infinite;
+            vertical-align: middle;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+        .rec-timer {
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+            font-size: 2.25rem; font-weight: 600; margin: 1rem 0;
+        }
+        .rec-warning {
+            background: var(--warn-bg); border: 1px solid var(--warn-border);
+            border-radius: 6px; padding: 0.625rem 0.875rem;
+            font-size: 0.875rem; margin: 0.75rem 0; text-align: center;
+        }
+
+        progress { width: 100%; height: 8px; border-radius: 4px; overflow: hidden; }
+        textarea {
+            width: 100%; min-height: 360px; padding: 1rem;
+            border: 1px solid var(--border); border-radius: 6px;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.875rem;
+            resize: vertical; white-space: pre-wrap; line-height: 1.6;
+        }
+        .status { display: flex; align-items: center; gap: 0.75rem; }
+        .spinner {
+            width: 1.125rem; height: 1.125rem; border: 2px solid var(--border);
+            border-top-color: var(--accent); border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .meta { color: var(--muted); font-size: 0.875rem; margin-top: 0.5rem; }
+        .row { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+        .row > button { flex: 1; min-width: 140px; }
+        .warning {
+            background: var(--warn-bg); border: 1px solid var(--warn-border);
+            border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.875rem;
+            margin: 1rem 0;
+        }
+        h2 { margin: 0 0 0.5rem; font-size: 1.125rem; }
+        .error-msg { color: var(--error); }
+        .divider {
+            text-align: center; color: var(--muted); font-size: 0.85rem;
+            margin: 0.75rem 0; position: relative;
+        }
+        .divider::before, .divider::after {
+            content: ''; position: absolute; top: 50%;
+            width: calc(50% - 30px); height: 1px; background: var(--border);
+        }
+        .divider::before { left: 0; }
+        .divider::after { right: 0; }
+
+        /* Metadata card */
+        details.meta-card { padding: 0; margin-bottom: 1rem; }
+        details.meta-card > summary {
+            list-style: none; cursor: pointer; padding: 1rem 1.25rem;
+            font-weight: 500; user-select: none;
+            display: flex; align-items: center; gap: 0.5rem;
+            min-height: 48px;
+        }
+        details.meta-card > summary::-webkit-details-marker { display: none; }
+        details.meta-card > summary::after {
+            content: '▼'; margin-left: auto; font-size: 0.75rem;
+            color: var(--muted); transition: transform 0.2s;
+        }
+        details.meta-card[open] > summary::after { transform: rotate(180deg); }
+        .meta-fields { padding: 0 1.25rem 1.25rem; display: grid; gap: 0.75rem; }
+        .meta-fields label { font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 0.25rem; }
+        .meta-fields input {
+            width: 100%; padding: 0.625rem 0.875rem;
+            border: 1px solid var(--border); border-radius: 6px;
+            font-size: 1rem; font-family: inherit; min-height: 44px;
+            background: white; color: var(--text);
+            -webkit-appearance: none;
+        }
+        .meta-fields input:focus { outline: none; border-color: var(--accent); }
+        .meta-note { color: var(--muted); font-size: 0.8rem; margin-top: 0.25rem; }
+
+        /* Queue (each file being processed) */
+        .queue-item {
+            border: 1px solid var(--border); border-radius: 8px;
+            padding: 0.875rem 1rem; margin-bottom: 0.75rem;
+            background: white;
+        }
+        .queue-item.done { background: var(--done-bg); border-color: var(--done-border); }
+        .queue-item.error { background: var(--error-bg); border-color: #fecaca; }
+        .queue-item-head {
+            display: flex; gap: 0.5rem; align-items: baseline;
+            margin-bottom: 0.5rem;
+        }
+        .queue-name { font-weight: 500; word-break: break-word; }
+        .queue-size { color: var(--muted); font-size: 0.85rem; flex-shrink: 0; }
+        .queue-status {
+            display: flex; align-items: center; gap: 0.5rem;
+            font-size: 0.9rem; margin: 0.5rem 0 0.25rem;
+        }
+        .queue-progress { margin: 0.5rem 0; }
+        .queue-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
+        .queue-actions button { flex: 0 1 auto; }
+        .queue-error-msg { color: var(--error); font-size: 0.85rem; margin-top: 0.25rem; }
+        .badge-done { color: #047857; }
+        .badge-error { color: var(--error); }
+
+        /* History */
+        details.history-card { padding: 0; }
+        details.history-card > summary {
+            list-style: none; cursor: pointer; padding: 1rem 1.25rem;
+            font-weight: 500; user-select: none;
+            display: flex; align-items: center; gap: 0.5rem;
+            min-height: 48px;
+        }
+        details.history-card > summary::-webkit-details-marker { display: none; }
+        details.history-card > summary::after {
+            content: '▼'; margin-left: auto; font-size: 0.75rem;
+            color: var(--muted); transition: transform 0.2s;
+        }
+        details.history-card[open] > summary::after { transform: rotate(180deg); }
+        .history-list { padding: 0 1.25rem 1.25rem; }
+        .history-item {
+            display: flex; align-items: center; gap: 0.75rem;
+            padding: 0.625rem 0; border-top: 1px solid var(--border);
+        }
+        .history-item:first-child { border-top: none; }
+        .history-info { flex: 1; min-width: 0; }
+        .history-info strong { display: block; word-break: break-word; }
+        .history-info .meta { font-size: 0.82rem; margin: 0; }
+        .history-actions { display: flex; gap: 0.375rem; flex-shrink: 0; }
+        .history-empty { color: var(--muted); font-size: 0.9rem; padding: 0.5rem 0; }
+
+        /* File ready (single, before transcribe) — unused but kept for fallback */
+        .file-info {
+            background: #eff6ff; border: 1px solid #bfdbfe;
+            border-radius: 6px; padding: 0.75rem 1rem; margin: 0.75rem 0;
+            font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem;
+        }
+
+        /* Changelog bell & popup */
+        .bell-btn {
+            background: white; color: var(--text);
+            border: 1px solid var(--border); border-radius: 6px;
+            min-height: 0; min-width: 0;
+            padding: 0.5rem 0.625rem;
+            font-size: 1rem; line-height: 1;
+            position: relative; cursor: pointer;
+        }
+        .bell-btn:hover { background: #f9fafb; }
+        .bell-btn .bell-badge {
+            position: absolute; top: -4px; right: -4px;
+            background: var(--error); color: white;
+            border-radius: 999px; min-width: 18px; height: 18px;
+            font-size: 0.7rem; font-weight: 600; line-height: 18px;
+            padding: 0 5px; text-align: center;
+            border: 2px solid white;
+        }
+        #changelog-popup {
+            position: fixed; z-index: 1000;
+            top: max(4.5rem, calc(env(safe-area-inset-top) + 4rem));
+            right: 1rem;
+            width: 400px; max-width: calc(100vw - 2rem);
+            max-height: calc(100vh - 6rem);
+            background: white; border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 10px 40px -10px rgba(0,0,0,0.25);
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+        /* The [hidden] attribute must override the display:flex above —
+           default UA 'display:none' loses to our higher-specificity ID rule.
+           Without this, the popup is permanently visible. */
+        #changelog-popup[hidden] { display: none !important; }
+        .changelog-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0.875rem 1rem;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .changelog-header h3 { font-size: 1rem; font-weight: 600; }
+        .changelog-close {
+            background: transparent; border: none; padding: 0.375rem;
+            min-height: 0; min-width: 0;
+            font-size: 1rem; color: var(--muted); cursor: pointer;
+            border-radius: 4px;
+        }
+        .changelog-close:hover { background: #f4f4f5; color: var(--text); }
+        .changelog-list { overflow-y: auto; padding: 0.25rem 0; }
+        .changelog-entry {
+            padding: 0.875rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .changelog-entry:last-child { border-bottom: none; }
+        .changelog-entry.unread {
+            background: linear-gradient(90deg, #eff6ff 0%, transparent 100%);
+            border-left: 3px solid var(--accent);
+            padding-left: calc(1rem - 3px);
+        }
+        .changelog-entry-head {
+            display: flex; align-items: baseline; justify-content: space-between;
+            gap: 0.5rem; margin-bottom: 0.375rem;
+        }
+        .changelog-version {
+            font-weight: 600; font-size: 0.95rem;
+        }
+        .changelog-date {
+            font-size: 0.75rem; color: var(--muted); flex-shrink: 0;
+        }
+        .changelog-items {
+            list-style: none; padding: 0; margin: 0;
+            font-size: 0.875rem; line-height: 1.45;
+        }
+        .changelog-items li {
+            padding: 0.25rem 0 0.25rem 1.25rem; position: relative;
+        }
+        .changelog-items li::before {
+            content: '•'; position: absolute; left: 0.375rem; color: var(--accent);
+            font-weight: 700;
+        }
+
+        /* Mobile tweaks */
+        @media (max-width: 600px) {
+            body { padding: 1rem 0.75rem; }
+            h1 { font-size: 1.375rem; }
+            .card { padding: 1rem; }
+            textarea { min-height: 280px; font-size: 0.95rem; }
+            .row > button { flex-basis: 100%; }
+        }
+        @media (display-mode: standalone) {
+            body { padding-top: max(1rem, env(safe-area-inset-top)); }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;margin-bottom:1.25rem">
+        <div style="min-width:0;flex:1">
+            <h1 style="margin:0">Помощник секретаря</h1>
+            <p class="subtitle" style="margin:0.25rem 0 0">Аудиозапись заседания → черновик протокола</p>
+        </div>
+        <div style="display:flex;gap:0.375rem;flex-shrink:0;position:relative">
+            <button type="button" id="bell-btn" class="bell-btn" aria-label="История изменений" title="История изменений">
+                🔔<span class="bell-badge" id="bell-badge" hidden></span>
+            </button>
+            <a href="/logout" id="logout-link" style="color:var(--muted);text-decoration:none;font-size:0.85rem;padding:0.5rem 0.75rem;border:1px solid var(--border);border-radius:6px;white-space:nowrap;display:inline-flex;align-items:center">Выйти</a>
+        </div>
+    </div>
+
+    <!-- CHANGELOG popup (hidden by default, opens on bell click) -->
+    <div id="changelog-popup" hidden>
+        <div class="changelog-header">
+            <h3 style="margin:0">История изменений</h3>
+            <button type="button" id="changelog-close-btn" class="changelog-close" aria-label="Закрыть">✕</button>
+        </div>
+        <div id="changelog-list" class="changelog-list"></div>
+    </div>
+
+    <!-- HISTORY (last N completed drafts saved locally) -->
+    <details class="card history-card" id="history-card" hidden>
+        <summary>📚 Недавние черновики <span id="history-count" class="meta" style="margin:0"></span></summary>
+        <div class="history-list" id="history-list"></div>
+    </details>
+
+    <!-- METADATA (optional, persists across uploads in the same session) -->
+    <details class="card meta-card" id="meta-card">
+        <summary>📋 Данные дела (необязательно, но улучшают шапку)</summary>
+        <div class="meta-fields">
+            <div>
+                <label for="meta-case">Номер дела</label>
+                <input id="meta-case" type="text" placeholder="например, 1-123/2026" autocomplete="off">
+            </div>
+            <div>
+                <label for="meta-defendant">ФИО подсудимого</label>
+                <input id="meta-defendant" type="text" placeholder="например, Иванов Иван Иванович" autocomplete="off">
+            </div>
+            <div>
+                <label for="meta-statute">Статья УК</label>
+                <input id="meta-statute" type="text" placeholder="например, 158 ч. 2 п. в" autocomplete="off">
+            </div>
+            <div>
+                <label for="meta-judge">Председательствующий</label>
+                <input id="meta-judge" type="text" list="judges-list" placeholder="например, Пономарёв В.А." autocomplete="off">
+                <datalist id="judges-list">
+                    <option value="Пономарёв В.А.">
+                    <option value="Лопатюк М.И.">
+                </datalist>
+                <p class="meta-note">По умолчанию — Пономарёв В.А.</p>
+            </div>
+        </div>
+    </details>
+
+    <!-- IDLE: pick file(s) OR record -->
+    <div class="card" id="upload-card">
+        <div id="drop-zone">
+            <p>Перетащите файлы сюда или выберите</p>
+            <p class="hint">Можно несколько разом · mp3 · wav · m4a · mp4 · ogg · webm</p>
+            <input type="file" id="file-input" accept="audio/*,video/mp4,.m4a,.webm" multiple>
+        </div>
+        <div class="row">
+            <button id="pick-btn" class="secondary big">📁 Выбрать файл(ы)</button>
+        </div>
+        <div class="divider">или</div>
+        <div class="row">
+            <button id="record-btn" class="big">🎙 Записать заседание</button>
+        </div>
+    </div>
+
+    <!-- RECORDING -->
+    <div class="card" id="recording-card" hidden style="text-align:center">
+        <p><span class="rec-indicator"></span><strong>Идёт запись</strong></p>
+        <div class="rec-timer" id="rec-timer">00:00</div>
+        <div class="rec-warning">
+            ⚠️ Не закрывайте приложение и не блокируйте экран
+        </div>
+        <div class="row">
+            <button id="stop-rec-btn" class="danger big">⏹ Остановить запись</button>
+        </div>
+    </div>
+
+    <!-- QUEUE (one row per file being processed; rows persist after done) -->
+    <div class="card" id="queue-card" hidden>
+        <h2 id="queue-title">Обработка</h2>
+        <div id="queue-list"></div>
+        <div class="row">
+            <button id="add-more-btn" class="secondary">+ Добавить ещё файл</button>
+            <button id="add-more-record-btn" class="secondary">🎙 Записать ещё</button>
+            <button id="clear-queue-btn" class="secondary">Очистить</button>
+        </div>
+    </div>
+
+    <!-- ERROR -->
+    <div class="card" id="error-card" hidden>
+        <h2 class="error-msg">Ошибка</h2>
+        <p id="error-text"></p>
+        <button class="secondary" onclick="location.reload()">Попробовать снова</button>
+    </div>
+</div>
+
+<!-- Hidden text fixture used by render-docx fallback -->
+<textarea id="hidden-staging" style="display:none"></textarea>
+
+<script>
+'use strict';
+
+const BACKEND = window.location.origin;
+const HISTORY_KEY = 'judge-helper:history-v1';
+const HISTORY_LIMIT = 25;
+const METADATA_KEY = 'judge-helper:metadata-draft-v1';
+
+// 401 from a protected endpoint = session expired. We DO NOT redirect
+// automatically anymore — that would destroy any unsaved recording held in
+// page memory. Instead we set a global flag; upload code shows an inline
+// "log in" prompt next to the affected queue item.
+let sessionExpired = false;
+const _origFetch = window.fetch.bind(window);
+window.fetch = async function (...args) {
+    const resp = await _origFetch(...args);
+    if (resp.status === 401) {
+        sessionExpired = true;
+    }
+    return resp;
+};
+
+// ---- IndexedDB: persist recorded audio BEFORE any network attempt -----
+// If the upload fails (auth, network, server) the blob stays on disk and
+// the user can retry. Previously a 401 redirect lost the entire recording.
+const IDB_DB = 'judge-helper-recordings';
+const IDB_STORE = 'pending';
+
+function openIDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(IDB_DB, 1);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(IDB_STORE)) {
+                db.createObjectStore(IDB_STORE, { keyPath: 'id' });
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function saveRecordingToIDB(blob, filename, mimeType, metadata) {
+    const id = 'rec_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).put({
+            id, blob, filename, mimeType, metadata, createdAt: Date.now(),
+        });
+        tx.oncomplete = () => { db.close(); resolve(id); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+    });
+}
+
+async function loadRecordingFromIDB(id) {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const req = tx.objectStore(IDB_STORE).get(id);
+        req.onsuccess = () => { db.close(); resolve(req.result || null); };
+        req.onerror = () => { db.close(); reject(req.error); };
+    });
+}
+
+async function deleteRecordingFromIDB(id) {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).delete(id);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+    });
+}
+
+async function listPendingRecordings() {
+    try {
+        const db = await openIDB();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readonly');
+            const req = tx.objectStore(IDB_STORE).getAll();
+            req.onsuccess = () => { db.close(); resolve(req.result || []); };
+            req.onerror = () => { db.close(); reject(req.error); };
+        });
+    } catch (e) {
+        console.warn('IDB list failed', e);
+        return [];
+    }
+}
+
+const $ = (id) => document.getElementById(id);
+
+// =========================================================================
+// Card switcher
+// =========================================================================
+const ALL_CARDS = ['upload-card', 'recording-card', 'queue-card', 'error-card'];
+function showCard(id) {
+    ALL_CARDS.forEach((c) => { $(c).hidden = (c !== id); });
+}
+
+// =========================================================================
+// History (localStorage)
+// =========================================================================
+function loadHistory() {
+    try {
+        const raw = localStorage.getItem(HISTORY_KEY);
+        return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+}
+function saveHistory(entries) {
+    try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, HISTORY_LIMIT)));
+    } catch (e) {
+        console.warn('localStorage write failed (quota?)', e);
+    }
+}
+function addToHistory(entry) {
+    const list = loadHistory().filter((h) => h.id !== entry.id);
+    list.unshift(entry);
+    saveHistory(list);
+    renderHistory();
+}
+function deleteFromHistory(id) {
+    saveHistory(loadHistory().filter((h) => h.id !== id));
+    renderHistory();
+}
+function renderHistory() {
+    const list = loadHistory();
+    const card = $('history-card');
+    const listEl = $('history-list');
+    const countEl = $('history-count');
+    if (list.length === 0) {
+        card.hidden = true;
+        return;
+    }
+    card.hidden = false;
+    countEl.textContent = `(${list.length})`;
+    listEl.innerHTML = '';
+    for (const entry of list) {
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        const date = entry.timestamp ? new Date(entry.timestamp) : new Date();
+        const dateStr = date.toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: 'numeric' })
+            + ' ' + date.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+        const meta = entry.metadata || {};
+        const title = meta.defendant || meta.case_number || entry.filename || 'Без названия';
+        const subtitle = `${dateStr} · ${entry.duration_min ?? '—'} мин`;
+        const info = document.createElement('div');
+        info.className = 'history-info';
+        const strong = document.createElement('strong');
+        strong.textContent = title;
+        const metaP = document.createElement('p');
+        metaP.className = 'meta';
+        metaP.textContent = subtitle;
+        info.appendChild(strong);
+        info.appendChild(metaP);
+        const actions = document.createElement('div');
+        actions.className = 'history-actions';
+        const openBtn = document.createElement('button');
+        openBtn.className = 'secondary small';
+        openBtn.textContent = 'Открыть';
+        openBtn.addEventListener('click', () => openHistoryEntry(entry));
+        const dlBtn = document.createElement('button');
+        dlBtn.className = 'small';
+        dlBtn.textContent = '⬇';
+        dlBtn.title = 'Скачать .docx';
+        dlBtn.addEventListener('click', () => downloadDocx(entry.draft, makeFilename(entry)));
+        const delBtn = document.createElement('button');
+        delBtn.className = 'secondary small';
+        delBtn.textContent = '✕';
+        delBtn.title = 'Удалить';
+        delBtn.addEventListener('click', () => {
+            if (confirm('Удалить этот черновик из истории?')) deleteFromHistory(entry.id);
+        });
+        actions.appendChild(openBtn);
+        actions.appendChild(dlBtn);
+        actions.appendChild(delBtn);
+        item.appendChild(info);
+        item.appendChild(actions);
+        listEl.appendChild(item);
+    }
+}
+function makeFilename(entry) {
+    const meta = entry.metadata || {};
+    const parts = [];
+    if (meta.case_number) parts.push(meta.case_number.replace(/[\\/:*?"<>|]/g, '_'));
+    if (meta.defendant)   parts.push(meta.defendant.split(' ')[0]);
+    if (parts.length === 0) {
+        const ts = new Date(entry.timestamp || Date.now()).toISOString().slice(0, 16).replace(/[:T]/g, '-');
+        parts.push(`protokol_${ts}`);
+    } else {
+        parts.unshift('protokol');
+    }
+    return parts.join('_') + '.docx';
+}
+function openHistoryEntry(entry) {
+    // Inject as a synthetic queue item already in "done" state, so user can
+    // edit / download from the usual place.
+    const item = {
+        key: 'h_' + entry.id,
+        file: null,
+        filename: entry.filename || 'Из истории',
+        sizeMB: '—',
+        metadata: entry.metadata || {},
+        status: 'done',
+        draft: entry.draft,
+        duration_min: entry.duration_min,
+        model: entry.model,
+        jobId: entry.id,
+        timestamp: entry.timestamp,
+        fromHistory: true,
+    };
+    // Prepend to queue (so it shows up at top), avoid duplicates
+    queue = queue.filter((q) => q.key !== item.key);
+    queue.unshift(item);
+    showCard('queue-card');
+    renderQueue();
+}
+
+// =========================================================================
+// Queue / state
+// =========================================================================
+let queue = [];
+
+function getMetadataFromForm() {
+    return {
+        case_number: ($('meta-case')?.value || '').trim(),
+        defendant:   ($('meta-defendant')?.value || '').trim(),
+        statute:     ($('meta-statute')?.value || '').trim(),
+        judge:       ($('meta-judge')?.value || '').trim(),
+    };
+}
+
+// Persist metadata fields locally so mom doesn't re-enter on every refresh
+function saveMetadataDraft() {
+    try {
+        localStorage.setItem(METADATA_KEY, JSON.stringify(getMetadataFromForm()));
+    } catch {}
+}
+function restoreMetadataDraft() {
+    try {
+        const raw = localStorage.getItem(METADATA_KEY);
+        if (!raw) return;
+        const m = JSON.parse(raw);
+        if (m.case_number) $('meta-case').value = m.case_number;
+        if (m.defendant)   $('meta-defendant').value = m.defendant;
+        if (m.statute)     $('meta-statute').value = m.statute;
+        if (m.judge)       $('meta-judge').value = m.judge;
+    } catch {}
+}
+['meta-case', 'meta-defendant', 'meta-statute', 'meta-judge'].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener('input', saveMetadataDraft);
+});
+
+// Auto-save draft edits back to history (debounced)
+const draftSaveTimers = {};
+function updateHistoryDraft(jobId, newDraft) {
+    if (!jobId) return;
+    clearTimeout(draftSaveTimers[jobId]);
+    draftSaveTimers[jobId] = setTimeout(() => {
+        const list = loadHistory();
+        const entry = list.find((h) => h.id === jobId);
+        if (entry) {
+            entry.draft = newDraft;
+            entry.editedAt = new Date().toISOString();
+            saveHistory(list);
+            renderHistory();
+        }
+        delete draftSaveTimers[jobId];
+    }, 1000);
+}
+
+function addFilesToQueue(files, opts = {}) {
+    const meta = getMetadataFromForm();
+    for (const f of Array.from(files)) {
+        const item = {
+            key: 'q_' + Math.random().toString(36).slice(2, 10),
+            file: f,
+            filename: f.name,
+            sizeMB: (f.size / 1024 / 1024).toFixed(1),
+            metadata: { ...meta },
+            idbId: opts.idbId || null,  // set for browser-recorded blobs
+            status: 'staged',  // NOT auto-processed — user must click "Расшифровать"
+            progress: 0,
+        };
+        queue.push(item);
+    }
+    showCard('queue-card');
+    renderQueue();
+}
+
+async function processQueueItem(item) {
+    item.status = 'uploading';
+    item.progress = 0;
+    renderQueue();
+    acquireWakeLock();
+    try {
+        const jobId = await uploadFile(item);
+        item.jobId = jobId;
+        item.status = 'processing';
+        item.phase = 'uploading_to_aai';
+        item.pollStart = Date.now();
+        renderQueue();
+        pollQueueItem(item);
+    } catch (err) {
+        if (err && err.code === 'AUTH') {
+            // Session expired — DO NOT redirect, blob still in IDB. Show
+            // inline prompt with login link + retry button.
+            item.status = 'auth_required';
+            item.error = err.message;
+            renderQueue();
+            releaseWakeLockIfDone();
+            return;
+        }
+        item.status = 'error';
+        item.error = err.message || String(err);
+        renderQueue();
+        releaseWakeLockIfDone();
+    }
+}
+
+function pollQueueItem(item) {
+    if (item.pollTimer) clearInterval(item.pollTimer);
+    let failures = 0;
+    const MAX_FAILURES = 5;
+    item.pollTimer = setInterval(async () => {
+        try {
+            const resp = await fetch(`${BACKEND}/status/${item.jobId}`);
+            if (!resp.ok) {
+                failures++;
+                if (failures >= MAX_FAILURES) {
+                    clearInterval(item.pollTimer);
+                    item.status = 'error';
+                    item.error = `Сервер не отвечает (HTTP ${resp.status})`;
+                    renderQueue();
+                    releaseWakeLockIfDone();
+                }
+                return;
+            }
+            failures = 0;
+            const data = await resp.json();
+            if (data.status === 'done') {
+                clearInterval(item.pollTimer);
+                item.status = 'done';
+                item.draft = data.draft;
+                item.duration_min = data.duration_min;
+                item.model = data.model;
+                item.timestamp = new Date().toISOString();
+                addToHistory({
+                    id: item.jobId,
+                    timestamp: item.timestamp,
+                    duration_min: item.duration_min,
+                    filename: item.filename,
+                    metadata: item.metadata,
+                    draft: item.draft,
+                    model: item.model,
+                });
+                // Upload succeeded — safe to drop the IDB backup
+                if (item.idbId) {
+                    deleteRecordingFromIDB(item.idbId).catch((e) => console.warn('IDB delete', e));
+                    item.idbId = null;
+                }
+                renderQueue();
+                releaseWakeLockIfDone();
+            } else if (data.status === 'transcribed') {
+                // Part of a multi-part session — transcribed but not drafted.
+                // Stop polling, mark as ready for merging.
+                clearInterval(item.pollTimer);
+                item.status = 'transcribed';
+                item.transcript = data.transcript;
+                item.duration_min = data.duration_min;
+                renderQueue();
+                releaseWakeLockIfDone();
+            } else if (data.status === 'error') {
+                clearInterval(item.pollTimer);
+                item.status = 'error';
+                item.error = data.error || 'Неизвестная ошибка';
+                renderQueue();
+                releaseWakeLockIfDone();
+            } else {
+                item.phase = data.phase || 'processing';
+                // Capture server-side timestamps + AAI audio duration so the
+                // render code can show a real ETA. Only set when present so
+                // we don't clobber values already received from a prior tick.
+                if (data.created_at)         item.created_at = data.created_at;
+                if (data.aai_started_at)     item.aai_started_at = data.aai_started_at;
+                if (data.drafting_started_at) item.drafting_started_at = data.drafting_started_at;
+                if (data.audio_duration_sec) item.audio_duration_sec = data.audio_duration_sec;
+                renderQueue();
+            }
+        } catch (err) {
+            failures++;
+            if (failures >= MAX_FAILURES) {
+                clearInterval(item.pollTimer);
+                item.status = 'error';
+                item.error = 'Не удалось получить статус.';
+                renderQueue();
+                releaseWakeLockIfDone();
+            }
+        }
+    }, 5000);
+}
+
+function uploadFile(item) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const form = new FormData();
+        form.append('file', item.file);
+        for (const [k, v] of Object.entries(item.metadata || {})) {
+            if (v) form.append(k, v);
+        }
+        if (item.markAsPart) {
+            form.append('is_part', 'true');
+        }
+        xhr.timeout = 10 * 60 * 1000;
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                item.progress = Math.round(e.loaded / e.total * 100);
+                renderQueue();
+            }
+        };
+        xhr.upload.onloadend = () => {
+            item.progress = 100;
+            item.uploadDone = true;
+            renderQueue();
+        };
+        xhr.onload = () => {
+            if (xhr.status === 401) {
+                // DO NOT redirect — that would lose the in-memory blob. Caller
+                // shows inline auth prompt; recording stays in IndexedDB.
+                const err = new Error('Сессия истекла. Войдите снова в новой вкладке и нажмите «Попробовать снова».');
+                err.code = 'AUTH';
+                reject(err);
+                return;
+            }
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    resolve(data.job_id);
+                } catch (e) {
+                    reject(new Error('Сервер вернул битый ответ'));
+                }
+            } else {
+                let msg = `HTTP ${xhr.status}`;
+                try {
+                    const j = JSON.parse(xhr.responseText);
+                    if (j.detail) msg += `: ${j.detail}`;
+                } catch (_) {}
+                reject(new Error(msg));
+            }
+        };
+        xhr.onerror = () => reject(new Error('Нет соединения с сервером. Проверьте интернет.'));
+        xhr.ontimeout = () => reject(new Error('Сервер не ответил за 10 минут. Попробуйте файл поменьше.'));
+        xhr.onabort = () => reject(new Error('Загрузка прервана'));
+        xhr.open('POST', `${BACKEND}/upload`);
+        xhr.send(form);
+    });
+}
+
+// =========================================================================
+// Queue rendering
+// =========================================================================
+function phaseLabel(phase) {
+    return {
+        'uploading_to_aai': 'Передача файла на расшифровку…',
+        'transcribing':     'Расшифровка аудио…',
+        'drafting':         'Составление черновика протокола…',
+    }[phase] || 'Обработка…';
+}
+
+// Estimate transcription progress. Returns { elapsedSec, estimatedSec, pct } or null
+// when we don't yet have audio_duration from AssemblyAI.
+//
+// Empirical multiplier 0.3 = AssemblyAI universal-2 + Russian + diarization runs
+// at roughly 30% of audio duration (per user-guide.md "1-5 мин на 10 мин записи").
+// Clamp to [60s, 600s] so a 30-second snippet doesn't get a "8s ETA" jitter,
+// and a 5-hour recording doesn't promise 90 minutes either.
+function estimateTranscribing(item) {
+    if (!item.aai_started_at || !item.audio_duration_sec) return null;
+    const nowSec = Date.now() / 1000;
+    const elapsedSec = Math.max(0, Math.round(nowSec - item.aai_started_at));
+    const estimatedSec = Math.max(60, Math.min(600, Math.round(item.audio_duration_sec * 0.3)));
+    // Cap at 98% — last 2% reserved for the "done" transition so the bar never
+    // sits at 100% with the spinner still spinning (bad UX).
+    const pct = Math.min(98, (elapsedSec / estimatedSec) * 100);
+    return { elapsedSec, estimatedSec, pct };
+}
+
+// Elapsed for the current phase, in seconds. Falls back through:
+//   transcribing -> aai_started_at
+//   drafting     -> drafting_started_at
+//   any          -> created_at
+//   (none known) -> pollStart (client-side, lost on reload)
+function phaseElapsedSec(item) {
+    const nowSec = Date.now() / 1000;
+    let startSec = null;
+    if (item.phase === 'transcribing' && item.aai_started_at) startSec = item.aai_started_at;
+    else if (item.phase === 'drafting' && item.drafting_started_at) startSec = item.drafting_started_at;
+    else if (item.created_at) startSec = item.created_at;
+    if (startSec != null) return Math.max(0, Math.round(nowSec - startSec));
+    return item.pollStart ? Math.round((Date.now() - item.pollStart) / 1000) : 0;
+}
+
+function renderQueue() {
+    const list = $('queue-list');
+    list.innerHTML = '';
+    if (queue.length === 0) {
+        $('queue-title').textContent = 'Очередь пуста';
+    } else {
+        const doneCnt = queue.filter((q) => q.status === 'done').length;
+        const errCnt  = queue.filter((q) => q.status === 'error').length;
+        const stagedCnt = queue.filter((q) => q.status === 'staged').length;
+        const inProgCnt = queue.length - doneCnt - errCnt - stagedCnt;
+        const parts = [];
+        if (stagedCnt) parts.push(`⏸ ${stagedCnt} ждут`);
+        if (inProgCnt) parts.push(`${inProgCnt} в работе`);
+        if (doneCnt)   parts.push(`✓ ${doneCnt}`);
+        if (errCnt)    parts.push(`⚠ ${errCnt}`);
+        $('queue-title').textContent = parts.length ? `Обработка — ${parts.join(', ')}` : 'Обработка';
+    }
+    for (const item of queue) {
+        list.appendChild(renderQueueItem(item));
+    }
+    renderStagedBar();
+    renderMergeBar();
+}
+
+// Bar above the queue when there are staged (not-yet-processed) items.
+// Lets mom batch-process them all in one click.
+function renderStagedBar() {
+    let bar = $('staged-bar');
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'staged-bar';
+        bar.style.cssText = 'background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.75rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap';
+        const list = $('queue-list');
+        list.parentNode.insertBefore(bar, list);
+    }
+    const staged = queue.filter((q) => q.status === 'staged');
+    if (staged.length < 2) {
+        bar.hidden = true;
+        return;
+    }
+    bar.hidden = false;
+    bar.innerHTML = '';
+    const label = document.createElement('div');
+    label.style.cssText = 'flex:1;min-width:200px';
+    label.innerHTML = `<strong>${staged.length} записей ждут обработки</strong> — расшифровать все сразу?`;
+    bar.appendChild(label);
+    const goBtn = document.createElement('button');
+    goBtn.textContent = '▶ Расшифровать всё';
+    goBtn.addEventListener('click', () => {
+        staged.forEach((s) => processQueueItem(s));
+    });
+    bar.appendChild(goBtn);
+}
+
+// Bar that appears above the list when 2+ items are selected for merging
+function renderMergeBar() {
+    let bar = $('merge-bar');
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'merge-bar';
+        bar.style.cssText = 'background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.75rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap';
+        const list = $('queue-list');
+        list.parentNode.insertBefore(bar, list);
+    }
+    const selected = queue.filter((q) => q.selected && (q.status === 'done' || q.status === 'transcribed'));
+    if (selected.length < 2) {
+        bar.hidden = true;
+        return;
+    }
+    bar.hidden = false;
+    bar.innerHTML = '';
+    const label = document.createElement('div');
+    label.style.cssText = 'flex:1;min-width:200px';
+    label.innerHTML = `<strong>Выбрано ${selected.length}</strong> — объединить как одно заседание?`;
+    bar.appendChild(label);
+    const mergeBtn = document.createElement('button');
+    mergeBtn.textContent = '🔗 Объединить';
+    mergeBtn.addEventListener('click', () => mergeSelectedAsSession(selected));
+    bar.appendChild(mergeBtn);
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'secondary';
+    cancelBtn.textContent = 'Отмена';
+    cancelBtn.addEventListener('click', () => {
+        queue.forEach((q) => q.selected = false);
+        renderQueue();
+    });
+    bar.appendChild(cancelBtn);
+}
+
+async function mergeSelectedAsSession(selected) {
+    const transcriptIds = selected.map((s) => s.jobId).filter(Boolean);
+    if (transcriptIds.length < 2) {
+        alert('Не удалось определить ID частей. Подождите пока все записи получат transcript_id.');
+        return;
+    }
+    // Deselect originals
+    queue.forEach((q) => q.selected = false);
+
+    // Create a new session-item in the queue
+    const sessionItem = {
+        key: 'ses_' + Math.random().toString(36).slice(2, 10),
+        filename: `Заседание из ${transcriptIds.length} частей`,
+        sizeMB: '—',
+        metadata: selected[0]?.metadata || {},
+        status: 'processing',
+        phase: 'drafting',
+        pollStart: Date.now(),
+        isSession: true,
+    };
+    queue.unshift(sessionItem);
+    renderQueue();
+    acquireWakeLock();
+
+    try {
+        const resp = await fetch(`${BACKEND}/combine-and-draft`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                transcript_ids: transcriptIds,
+                metadata: sessionItem.metadata,
+            }),
+        });
+        if (!resp.ok) {
+            const errText = await resp.text();
+            throw new Error(`HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+        }
+        const data = await resp.json();
+        sessionItem.jobId = data.job_id;
+        renderQueue();
+        // Poll the session id like a regular item
+        pollQueueItem(sessionItem);
+    } catch (err) {
+        sessionItem.status = 'error';
+        sessionItem.error = err.message || String(err);
+        renderQueue();
+        releaseWakeLockIfDone();
+    }
+}
+
+function renderQueueItem(item) {
+    const wrap = document.createElement('div');
+    wrap.className = 'queue-item ' + (
+        item.status === 'done' ? 'done' :
+        (item.status === 'error' || item.status === 'auth_required') ? 'error' : ''
+    );
+
+    const head = document.createElement('div');
+    head.className = 'queue-item-head';
+
+    // Selection checkbox — only for items that are done/transcribed (eligible
+    // to merge into one session). Sessions themselves are not selectable.
+    if ((item.status === 'done' || item.status === 'transcribed') && !item.isSession) {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!item.selected;
+        cb.title = 'Выбрать для объединения с другими частями';
+        cb.style.cssText = 'margin-right:0.5rem;width:20px;height:20px;flex-shrink:0;cursor:pointer';
+        cb.addEventListener('change', () => {
+            item.selected = cb.checked;
+            renderMergeBar();
+        });
+        head.appendChild(cb);
+    }
+
+    const name = document.createElement('div');
+    name.className = 'queue-name';
+    name.textContent = (item.isSession ? '🔗 ' : '🎵 ') + item.filename;
+    head.appendChild(name);
+    if (item.sizeMB && item.sizeMB !== '—') {
+        const size = document.createElement('span');
+        size.className = 'queue-size';
+        size.textContent = item.sizeMB + ' МБ';
+        head.appendChild(size);
+    }
+    wrap.appendChild(head);
+
+    // Status row
+    const status = document.createElement('div');
+    status.className = 'queue-status';
+    if (item.status === 'uploading') {
+        const sp = document.createElement('div'); sp.className = 'spinner'; status.appendChild(sp);
+        const t = document.createElement('span');
+        t.textContent = item.uploadDone
+            ? 'Получение ответа сервера…'
+            : `Загрузка файла… ${item.progress}%`;
+        status.appendChild(t);
+    } else if (item.status === 'processing') {
+        const sp = document.createElement('div'); sp.className = 'spinner'; status.appendChild(sp);
+        const t = document.createElement('span');
+        const elapsed = phaseElapsedSec(item);
+        const est = item.phase === 'transcribing' ? estimateTranscribing(item) : null;
+        let suffix = elapsed ? ` (${formatHMS(elapsed)}` : '';
+        if (est) suffix += ` из ≈${formatHMS(est.estimatedSec)}`;
+        suffix += elapsed ? ')' : '';
+        t.textContent = phaseLabel(item.phase) + suffix;
+        status.appendChild(t);
+    } else if (item.status === 'done') {
+        const t = document.createElement('span');
+        t.className = 'badge-done';
+        t.innerHTML = `✓ Готово · ${item.duration_min ?? '—'} мин · ${(item.draft?.length || 0).toLocaleString('ru')} символов`;
+        status.appendChild(t);
+    } else if (item.status === 'transcribed') {
+        const t = document.createElement('span');
+        t.className = 'badge-done';
+        t.textContent = `✓ Расшифровано · ${item.duration_min ?? '—'} мин · готово к объединению`;
+        status.appendChild(t);
+    } else if (item.status === 'auth_required') {
+        const t = document.createElement('span');
+        t.className = 'badge-error';
+        t.textContent = '🔒 Войдите заново';
+        status.appendChild(t);
+    } else if (item.status === 'error') {
+        const t = document.createElement('span');
+        t.className = 'badge-error';
+        t.textContent = '⚠ Ошибка';
+        status.appendChild(t);
+    } else if (item.status === 'staged') {
+        const t = document.createElement('span');
+        t.style.color = 'var(--muted)';
+        t.textContent = '⏸ Готов к обработке';
+        status.appendChild(t);
+    } else {
+        const t = document.createElement('span');
+        t.textContent = 'В очереди…';
+        status.appendChild(t);
+    }
+    wrap.appendChild(status);
+
+    // Progress bar during upload
+    if (item.status === 'uploading') {
+        const pr = document.createElement('progress');
+        pr.className = 'queue-progress';
+        pr.max = 100;
+        if (item.uploadDone) {
+            pr.removeAttribute('value');
+        } else {
+            pr.value = item.progress || 0;
+        }
+        wrap.appendChild(pr);
+    } else if (item.status === 'processing') {
+        const pr = document.createElement('progress');
+        pr.className = 'queue-progress';
+        // Determinate bar only when we have an estimate (transcribing phase
+        // with audio_duration_sec known). Otherwise indeterminate, matching
+        // previous behaviour. Drafting phase is short + variable, no estimate.
+        const est = item.phase === 'transcribing' ? estimateTranscribing(item) : null;
+        if (est) {
+            pr.max = 100;
+            pr.value = est.pct;
+        }
+        wrap.appendChild(pr);
+    }
+
+    if ((item.status === 'error' || item.status === 'auth_required') && item.error) {
+        const err = document.createElement('div');
+        err.className = 'queue-error-msg';
+        err.textContent = item.error;
+        wrap.appendChild(err);
+    }
+    if (item.status === 'auth_required') {
+        const hint = document.createElement('div');
+        hint.className = 'queue-error-msg';
+        hint.style.color = 'var(--text)';
+        hint.innerHTML = '📦 <strong>Запись сохранена в браузере</strong> — она не пропадёт. ' +
+            'Откройте вход в новой вкладке, войдите, вернитесь сюда и нажмите «Попробовать снова».';
+        wrap.appendChild(hint);
+    }
+
+    // Actions
+    const actions = document.createElement('div');
+    actions.className = 'queue-actions';
+
+    if (item.status === 'staged') {
+        const goBtn = document.createElement('button');
+        goBtn.className = 'small';
+        goBtn.textContent = '▶ Расшифровать';
+        goBtn.addEventListener('click', () => {
+            processQueueItem(item);
+        });
+        actions.appendChild(goBtn);
+
+        // Mark-as-part toggle: if user knows this is part of a multi-part
+        // session, they can mark it so it doesn't generate an individual draft.
+        const partBtn = document.createElement('button');
+        partBtn.className = 'secondary small';
+        partBtn.textContent = item.markAsPart ? '🔗 Часть заседания ✓' : '🔗 Часть заседания';
+        partBtn.title = 'Если это часть записи с перерывом — поставьте отметку, и черновик будет генерироваться один раз для всех частей вместе';
+        partBtn.addEventListener('click', () => {
+            item.markAsPart = !item.markAsPart;
+            renderQueue();
+        });
+        actions.appendChild(partBtn);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'secondary small';
+        removeBtn.textContent = '✕ Убрать';
+        removeBtn.addEventListener('click', () => {
+            if (item.idbId) deleteRecordingFromIDB(item.idbId).catch(() => {});
+            queue = queue.filter((q) => q.key !== item.key);
+            if (queue.length === 0) showCard('upload-card');
+            else renderQueue();
+        });
+        actions.appendChild(removeBtn);
+    }
+
+    if (item.status === 'done') {
+        const expandBtn = document.createElement('button');
+        expandBtn.className = 'small';
+        expandBtn.textContent = item.expanded ? 'Свернуть' : '✏ Открыть и править';
+        expandBtn.addEventListener('click', () => {
+            item.expanded = !item.expanded;
+            renderQueue();
+        });
+        actions.appendChild(expandBtn);
+
+        const dlBtn = document.createElement('button');
+        dlBtn.className = 'small';
+        dlBtn.textContent = '⬇ Скачать .docx';
+        dlBtn.addEventListener('click', async () => {
+            const text = item.expanded
+                ? (document.getElementById('draft-' + item.key)?.value || item.draft)
+                : item.draft;
+            await downloadDocx(text, makeFilename({
+                metadata: item.metadata,
+                timestamp: item.timestamp,
+                filename: item.filename,
+            }));
+        });
+        actions.appendChild(dlBtn);
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'secondary small';
+        copyBtn.textContent = 'Скопировать';
+        copyBtn.addEventListener('click', async () => {
+            const text = item.expanded
+                ? (document.getElementById('draft-' + item.key)?.value || item.draft)
+                : item.draft;
+            try {
+                await navigator.clipboard.writeText(text);
+                copyBtn.textContent = 'Скопировано ✓';
+                setTimeout(() => { copyBtn.textContent = 'Скопировать'; }, 1500);
+            } catch (e) {
+                alert('Не удалось. Выделите текст вручную.');
+            }
+        });
+        actions.appendChild(copyBtn);
+    }
+
+    if (item.status === 'auth_required') {
+        const loginBtn = document.createElement('button');
+        loginBtn.className = 'small';
+        loginBtn.textContent = '🔑 Войти';
+        loginBtn.addEventListener('click', () => {
+            // Open login in a separate tab so this page (with the in-memory
+            // file/idbId reference) stays alive and ready to retry.
+            window.open('/login', '_blank');
+        });
+        actions.appendChild(loginBtn);
+
+        const retryBtn = document.createElement('button');
+        retryBtn.className = 'secondary small';
+        retryBtn.textContent = '↻ Попробовать снова';
+        retryBtn.addEventListener('click', async () => {
+            // If we have the in-memory File, just retry; otherwise reload from IDB.
+            if (!item.file && item.idbId) {
+                try {
+                    const rec = await loadRecordingFromIDB(item.idbId);
+                    if (rec) {
+                        item.file = new File([rec.blob], rec.filename, { type: rec.mimeType });
+                    }
+                } catch (e) {
+                    item.status = 'error';
+                    item.error = 'Не удалось восстановить запись из памяти браузера';
+                    renderQueue();
+                    return;
+                }
+            }
+            sessionExpired = false;
+            processQueueItem(item);
+        });
+        actions.appendChild(retryBtn);
+    }
+
+    if (item.status === 'error' || item.status === 'done' || item.status === 'auth_required') {
+        const rmBtn = document.createElement('button');
+        rmBtn.className = 'secondary small';
+        rmBtn.textContent = '✕ Убрать';
+        rmBtn.addEventListener('click', () => {
+            // For auth_required also drop the IDB entry — user is abandoning
+            if (item.idbId && item.status !== 'done') {
+                deleteRecordingFromIDB(item.idbId).catch(() => {});
+            }
+            queue = queue.filter((q) => q.key !== item.key);
+            if (queue.length === 0) {
+                showCard('upload-card');
+            } else {
+                renderQueue();
+            }
+        });
+        actions.appendChild(rmBtn);
+    }
+
+    if (actions.children.length) wrap.appendChild(actions);
+
+    // Expanded view: editable draft + warning
+    if (item.expanded && item.status === 'done') {
+        const warn = document.createElement('div');
+        warn.className = 'warning';
+        warn.innerHTML = '⚠️ <strong>Это черновик.</strong> Правки сохраняются — скачайте .docx чтобы они попали в файл. Сверяйте с аудио: ФИО, даты, статьи УК.';
+        wrap.appendChild(warn);
+
+        const ta = document.createElement('textarea');
+        ta.id = 'draft-' + item.key;
+        ta.spellcheck = false;
+        ta.value = item.draft;
+        ta.addEventListener('input', () => {
+            item.draft = ta.value;
+            // Also persist to history so edits survive page reload
+            updateHistoryDraft(item.jobId, ta.value);
+        });
+        wrap.appendChild(ta);
+    }
+
+    return wrap;
+}
+
+function formatHMS(s) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
+}
+
+// Update timers periodically while items are in 'processing'.
+// Skip while user is editing — otherwise the textarea gets recreated
+// on every tick and we lose cursor / selection / scroll position.
+setInterval(() => {
+    const editing = document.activeElement && (
+        document.activeElement.tagName === 'TEXTAREA' ||
+        document.activeElement.tagName === 'INPUT'
+    );
+    if (editing) return;
+    if (queue.some((q) => q.status === 'processing')) renderQueue();
+}, 1000);
+
+// =========================================================================
+// File picker / drag-drop
+// =========================================================================
+const fileInput = $('file-input');
+const dropZone  = $('drop-zone');
+
+dropZone.addEventListener('click', () => fileInput.click());
+$('pick-btn').addEventListener('click', () => fileInput.click());
+$('add-more-btn').addEventListener('click', () => fileInput.click());
+
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) addFilesToQueue(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length) {
+        addFilesToQueue(e.target.files);
+        e.target.value = '';  // allow picking the same file twice
+    }
+});
+
+// =========================================================================
+// Recording (works in both upload-card and queue-card via add-more-record)
+// =========================================================================
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingStart = 0;
+let recordingTimer = null;
+let recordingStream = null;
+let wakeLock = null;
+let prevCardBeforeRecording = 'upload-card';
+
+async function startRecording() {
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+        showError('Этот браузер не поддерживает запись звука. Попробуйте Safari (iPhone) или Chrome.');
+        return;
+    }
+    try {
+        recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+        showError('Не удалось получить доступ к микрофону. Разрешите доступ в настройках.');
+        return;
+    }
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac'];
+    let mimeType = '';
+    for (const t of candidates) {
+        if (MediaRecorder.isTypeSupported(t)) { mimeType = t; break; }
+    }
+    recordedChunks = [];
+    try {
+        mediaRecorder = mimeType
+            ? new MediaRecorder(recordingStream, { mimeType })
+            : new MediaRecorder(recordingStream);
+    } catch (err) {
+        showError('Не удалось запустить запись: ' + err.message);
+        recordingStream.getTracks().forEach((t) => t.stop());
+        return;
+    }
+    mediaRecorder.addEventListener('dataavailable', (e) => {
+        if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+    });
+    mediaRecorder.addEventListener('stop', onRecordingStopped);
+    mediaRecorder.start(1000);
+    recordingStart = Date.now();
+    prevCardBeforeRecording = $('queue-card').hidden ? 'upload-card' : 'queue-card';
+    showCard('recording-card');
+    startTimer();
+    acquireWakeLock();
+}
+
+$('record-btn').addEventListener('click', startRecording);
+$('add-more-record-btn').addEventListener('click', startRecording);
+$('stop-rec-btn').addEventListener('click', () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+});
+
+function startTimer() {
+    clearInterval(recordingTimer);
+    recordingTimer = setInterval(() => {
+        const sec = Math.floor((Date.now() - recordingStart) / 1000);
+        $('rec-timer').textContent = formatHMS(sec);
+    }, 250);
+}
+
+async function onRecordingStopped() {
+    clearInterval(recordingTimer);
+    if (recordingStream) {
+        recordingStream.getTracks().forEach((t) => t.stop());
+        recordingStream = null;
+    }
+    const mimeType = mediaRecorder.mimeType || 'audio/webm';
+    const ext = mimeType.includes('mp4') ? 'm4a' : (mimeType.includes('webm') ? 'webm' : 'audio');
+    const blob = new Blob(recordedChunks, { type: mimeType });
+    const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    const filename = `zasedanie_${ts}.${ext}`;
+    const metadata = getMetadataFromForm();
+
+    // CRITICAL: persist the blob to IndexedDB IMMEDIATELY. Even if the
+    // browser crashes, the network drops, or auth fails — the recording is
+    // safe on disk and can be recovered next time the page loads.
+    let idbId = null;
+    try {
+        idbId = await saveRecordingToIDB(blob, filename, mimeType, metadata);
+    } catch (e) {
+        console.error('IDB save failed — recording exists only in memory:', e);
+    }
+
+    const file = new File([blob], filename, { type: mimeType });
+    addFilesToQueue([file], { idbId });
+}
+
+async function acquireWakeLock() {
+    if (wakeLock || !('wakeLock' in navigator)) return;
+    try {
+        wakeLock = await navigator.wakeLock.request('screen');
+    } catch (e) {
+        console.warn('Wake lock failed:', e);
+    }
+}
+async function releaseWakeLock() {
+    if (wakeLock) {
+        try { await wakeLock.release(); } catch (e) {}
+        wakeLock = null;
+    }
+}
+function releaseWakeLockIfDone() {
+    const stillActive = queue.some((q) =>
+        q.status === 'uploading' || q.status === 'processing'
+    ) || (mediaRecorder && mediaRecorder.state === 'recording');
+    if (!stillActive) releaseWakeLock();
+}
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' &&
+        (mediaRecorder?.state === 'recording' ||
+         queue.some((q) => q.status === 'uploading' || q.status === 'processing'))) {
+        acquireWakeLock();
+    }
+});
+
+// =========================================================================
+// Queue controls
+// =========================================================================
+$('clear-queue-btn').addEventListener('click', () => {
+    // Stop polling for any in-progress items
+    queue.forEach((q) => { if (q.pollTimer) clearInterval(q.pollTimer); });
+    queue = [];
+    showCard('upload-card');
+});
+
+// =========================================================================
+// Download helper
+// =========================================================================
+async function downloadDocx(text, filename) {
+    if (!text || !text.trim()) return;
+    try {
+        const resp = await fetch(`${BACKEND}/render-docx`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, filename }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        // Fallback: plain text
+        const txtName = filename.replace(/\.docx$/, '.txt');
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = txtName;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+}
+
+// =========================================================================
+// Error display
+// =========================================================================
+function showError(msg) {
+    releaseWakeLock();
+    showCard('error-card');
+    $('error-text').textContent = msg;
+}
+
+// =========================================================================
+// Changelog (bell icon + popup)
+// =========================================================================
+const CHANGELOG_KEY = 'judge-helper:changelog-last-seen';
+
+// Add new entries at the TOP. Bump 'version' on each release.
+// Date format: 'YYYY-MM-DD' or 'DD месяца YYYY' — kept consistent for readability.
+const CHANGELOG = [
+    {
+        version: 8,
+        date: '23 мая 2026',
+        items: [
+            'Прогресс расшифровки показывает реальное время: «Расшифровка аудио… (1:23 из ≈3:30)» и заполняющаяся полоска. Видно сколько ждать.',
+            'Сервер запоминает текущие задачи на диск — если случайно перезапустится (обновление, сбой), черновики и расшифровки не пропадают.',
+        ],
+    },
+    {
+        version: 7,
+        date: '22 мая 2026',
+        items: [
+            'История изменений переехала в колокольчик 🔔 справа сверху — не занимает экран. Все прошлые обновления тоже здесь.',
+        ],
+    },
+    {
+        version: 6,
+        date: '22 мая 2026',
+        items: [
+            'Запись больше не отправляется автоматически после нажатия «Стоп» — попадает в очередь со статусом «Готов к обработке», вы нажимаете «▶ Расшифровать» когда готовы.',
+            'Можно сразу обработать пачку — кнопка «▶ Расшифровать всё» появляется когда 2+ записей ждут.',
+            'Заседание с перерывом: загрузите обе части, дождитесь когда обе ✓ готовы, поставьте галочки слева → жмите «🔗 Объединить» → получится один цельный протокол.',
+        ],
+    },
+    {
+        version: 5,
+        date: '22 мая 2026',
+        items: [
+            'Добавлено 5 новых образцов разных типов заседаний (особый порядок, апелляция, общий процесс, многоэпизодное дело с приговором, отложение) — помощник точнее угадывает стилистику под тип процесса.',
+            'Шрифт черновика — Times New Roman.',
+        ],
+    },
+    {
+        version: 4,
+        date: '21 мая 2026',
+        items: [
+            '«ПРОВЕРИТЬ ПЕРЕД СДАЧЕЙ» — короткий чек-лист в конце черновика со списком ключевых фактов (ФИО, статья, сумма, решение). Сверьте только эти строки с аудио — не нужно перечитывать весь протокол.',
+            'Шапка протокола заполняется автоматически — помощник слышит в начале заседания номер дела, ФИО подсудимого, статью УК. Поля «Данные дела» нужны только если в записи реквизиты не озвучены.',
+        ],
+    },
+    {
+        version: 3,
+        date: '20 мая 2026',
+        items: [
+            'Личный доступ по логину и паролю — посторонние без пароля не зайдут. Браузер запоминает на месяц.',
+            'Кнопка «Выйти» в правом верхнем углу.',
+        ],
+    },
+    {
+        version: 2,
+        date: '20 мая 2026',
+        items: [
+            'Автосохранение полей «Данные дела» и правок черновика — закрыли страницу случайно, всё на месте.',
+            'История последних черновиков сохраняется на устройстве.',
+        ],
+    },
+    {
+        version: 1,
+        date: '18 мая 2026',
+        items: [
+            'Запись прямо с телефона — кнопка «🎙 Записать заседание».',
+            'Несколько файлов сразу — обрабатываются параллельно.',
+            'Правка черновика прямо в браузере перед скачиванием .docx.',
+            'Можно установить иконку на главный экран (через «Поделиться» → «На экран Домой»).',
+        ],
+    },
+];
+
+function getLastSeenChangelog() {
+    try {
+        return parseInt(localStorage.getItem(CHANGELOG_KEY) || '0', 10);
+    } catch { return 0; }
+}
+function setLastSeenChangelog(version) {
+    try { localStorage.setItem(CHANGELOG_KEY, String(version)); } catch {}
+}
+function unreadChangelogCount() {
+    const lastSeen = getLastSeenChangelog();
+    return CHANGELOG.filter((e) => e.version > lastSeen).length;
+}
+
+function updateBellBadge() {
+    const count = unreadChangelogCount();
+    const badge = $('bell-badge');
+    if (count > 0) {
+        badge.textContent = count > 9 ? '9+' : String(count);
+        badge.hidden = false;
+    } else {
+        badge.hidden = true;
+    }
+}
+
+function renderChangelog() {
+    const list = $('changelog-list');
+    list.innerHTML = '';
+    const lastSeen = getLastSeenChangelog();
+    for (const entry of CHANGELOG) {
+        const div = document.createElement('div');
+        div.className = 'changelog-entry' + (entry.version > lastSeen ? ' unread' : '');
+        const head = document.createElement('div');
+        head.className = 'changelog-entry-head';
+        const ver = document.createElement('span');
+        ver.className = 'changelog-version';
+        ver.textContent = `Версия ${entry.version}`;
+        head.appendChild(ver);
+        const date = document.createElement('span');
+        date.className = 'changelog-date';
+        date.textContent = entry.date;
+        head.appendChild(date);
+        div.appendChild(head);
+        const ul = document.createElement('ul');
+        ul.className = 'changelog-items';
+        for (const txt of entry.items) {
+            const li = document.createElement('li');
+            li.textContent = txt;
+            ul.appendChild(li);
+        }
+        div.appendChild(ul);
+        list.appendChild(div);
+    }
+}
+
+function openChangelog() {
+    renderChangelog();
+    $('changelog-popup').hidden = false;
+    // Mark as read — set lastSeen to the highest version
+    const latest = Math.max(...CHANGELOG.map((e) => e.version));
+    setLastSeenChangelog(latest);
+    updateBellBadge();
+}
+function closeChangelog() {
+    $('changelog-popup').hidden = true;
+}
+
+$('bell-btn').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if ($('changelog-popup').hidden) openChangelog();
+    else closeChangelog();
+});
+$('changelog-close-btn').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeChangelog();
+});
+// Click outside the popup closes it
+document.addEventListener('click', (e) => {
+    const popup = $('changelog-popup');
+    if (popup.hidden) return;
+    const bell = $('bell-btn');
+    if (!popup.contains(e.target) && !bell.contains(e.target) && e.target !== bell) {
+        closeChangelog();
+    }
+});
+
+// =========================================================================
+// Recover pending recordings from IndexedDB (failed/orphaned uploads)
+// =========================================================================
+async function recoverPendingRecordings() {
+    const pending = await listPendingRecordings();
+    if (!pending.length) return;
+    for (const rec of pending) {
+        const file = new File([rec.blob], rec.filename, { type: rec.mimeType });
+        const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+        const item = {
+            key: 'q_' + Math.random().toString(36).slice(2, 10),
+            file,
+            filename: rec.filename,
+            sizeMB,
+            metadata: rec.metadata || {},
+            idbId: rec.id,
+            status: 'auth_required',  // gets the recovery UI with retry button
+            error: 'Запись осталась с прошлого раза. Войдите если нужно — и нажмите «Попробовать снова».',
+            progress: 0,
+            recovered: true,
+        };
+        queue.push(item);
+    }
+    showCard('queue-card');
+    renderQueue();
+}
+
+// =========================================================================
+// Init
+// =========================================================================
+updateBellBadge();
+renderChangelog();  // pre-populate so popup is always ready
+restoreMetadataDraft();
+renderHistory();
+recoverPendingRecordings();
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch((err) => {
+            console.warn('SW registration failed:', err);
+        });
+    });
+}
+</script>
+</body>
+</html>
