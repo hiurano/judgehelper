@@ -272,8 +272,8 @@ LOGIN_HTML = """<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Вход — Помощник секретаря</title>
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    <link rel="icon" type="image/png" href="/static/icon-192.png">
-    <meta name="theme-color" content="#2563eb">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <meta name="theme-color" content="#212121">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <style>
@@ -283,19 +283,19 @@ LOGIN_HTML = """<!DOCTYPE html>
             margin: 0; min-height: 100vh;
             display: flex; align-items: center; justify-content: center;
             padding: 1.5rem;
-            background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
-            color: #18181b;
+            background: #212121;
+            color: #ececec;
             -webkit-text-size-adjust: 100%;
         }
         .card {
-            background: white; border: 1px solid #e4e4e7;
+            background: #2f2f2f; border: 1px solid transparent;
             border-radius: 16px; padding: 2rem 1.5rem;
-            box-shadow: 0 10px 30px -10px rgba(37, 99, 235, 0.15);
+            box-shadow: 0 20px 40px -10px rgba(0,0,0,0.5);
             width: 100%; max-width: 380px;
         }
         .logo {
             width: 72px; height: 72px; margin: 0 auto 1rem;
-            background: #2563eb; color: white;
+            background: #ffffff; color: #212121;
             border-radius: 18px;
             display: flex; align-items: center; justify-content: center;
             font-size: 1.75rem; font-weight: 700;
@@ -304,44 +304,45 @@ LOGIN_HTML = """<!DOCTYPE html>
         h1 {
             text-align: center; margin: 0 0 0.25rem;
             font-size: 1.375rem;
+            color: #ececec;
         }
         .subtitle {
-            text-align: center; color: #71717a;
+            text-align: center; color: #b4b4b4;
             margin: 0 0 1.5rem; font-size: 0.95rem;
         }
         .error {
-            background: #fef2f2; border: 1px solid #fecaca;
-            color: #b91c1c;
+            background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2);
+            color: #ef4444;
             border-radius: 8px; padding: 0.625rem 0.875rem;
             font-size: 0.875rem; margin-bottom: 1rem;
         }
         label {
             display: block; margin-bottom: 0.875rem;
-            font-size: 0.85rem; color: #52525b;
+            font-size: 0.85rem; color: #b4b4b4;
         }
         input {
             display: block; width: 100%;
             margin-top: 0.375rem;
             padding: 0.75rem 0.875rem;
-            border: 1px solid #d4d4d8; border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px;
             font-size: 1rem; font-family: inherit;
             min-height: 48px;
-            background: white; color: #18181b;
+            background: rgba(0, 0, 0, 0.2); color: #ececec;
             -webkit-appearance: none;
         }
-        input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+        input:focus { outline: none; border-color: #ffffff; box-shadow: none; }
         button {
             width: 100%; min-height: 48px;
-            background: #2563eb; color: white; border: none;
+            background: #ffffff; color: #212121; border: none;
             border-radius: 8px; padding: 0.875rem 1.25rem;
-            font-size: 1rem; font-weight: 500; cursor: pointer;
+            font-size: 1rem; font-weight: 600; cursor: pointer;
             margin-top: 0.5rem;
             transition: background-color 0.15s, transform 0.05s;
         }
-        button:hover { background: #1e40af; }
+        button:hover { background: #e5e5e5; }
         button:active { transform: scale(0.98); }
         .hint {
-            text-align: center; color: #a1a1aa; font-size: 0.8rem;
+            text-align: center; color: #b4b4b4; font-size: 0.8rem;
             margin: 1.25rem 0 0;
         }
     </style>
