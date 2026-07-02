@@ -278,7 +278,7 @@
         .queue-item.error { background: var(--error-bg); border-color: var(--error-border); }
         
         .queue-item-head {
-            display: flex; gap: 0.75rem; align-items: baseline;
+            display: flex; gap: 0.75rem; align-items: center;
             margin-bottom: 0.75rem;
         }
         .queue-name { font-weight: 600; word-break: break-word; font-size: 1.05rem; }
@@ -1169,21 +1169,6 @@ function renderQueueItem(item) {
     const head = document.createElement('div');
     head.className = 'queue-item-head';
 
-    // Selection checkbox — only for items that are done/transcribed (eligible
-    // to merge into one session). Sessions themselves are not selectable.
-    if ((item.status === 'done' || item.status === 'transcribed') && !item.isSession) {
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = !!item.selected;
-        cb.title = 'Выбрать для объединения с другими частями';
-        cb.style.cssText = 'margin-right:0.5rem;width:20px;height:20px;flex-shrink:0;cursor:pointer';
-        cb.addEventListener('change', () => {
-            item.selected = cb.checked;
-            renderMergeBar();
-        });
-        head.appendChild(cb);
-    }
-
     const name = document.createElement('div');
     name.className = 'queue-name';
     name.textContent = (item.isSession ? 'Часть: ' : '') + item.filename;
@@ -1209,6 +1194,24 @@ function renderQueueItem(item) {
             else renderQueue();
         });
         head.appendChild(rmBtn);
+    }
+    
+    if (item.status === 'done') {
+        const dlBtn = document.createElement('button');
+        dlBtn.className = 'small';
+        dlBtn.textContent = 'Скачать .docx';
+        dlBtn.style.cssText = 'margin-left: auto;';
+        dlBtn.addEventListener('click', async () => {
+            const text = item.expanded
+                ? (document.getElementById('draft-' + item.key)?.value || item.draft)
+                : item.draft;
+            await downloadDocx(text, makeFilename({
+                metadata: item.metadata,
+                timestamp: item.timestamp,
+                filename: item.filename,
+            }));
+        });
+        head.appendChild(dlBtn);
     }
     
     wrap.appendChild(head);
@@ -1312,24 +1315,6 @@ function renderQueueItem(item) {
     // Actions
     const actions = document.createElement('div');
     actions.className = 'queue-actions';
-
-    if (item.status === 'done') {
-
-        const dlBtn = document.createElement('button');
-        dlBtn.className = 'small';
-        dlBtn.textContent = '⬇ Скачать .docx';
-        dlBtn.addEventListener('click', async () => {
-            const text = item.expanded
-                ? (document.getElementById('draft-' + item.key)?.value || item.draft)
-                : item.draft;
-            await downloadDocx(text, makeFilename({
-                metadata: item.metadata,
-                timestamp: item.timestamp,
-                filename: item.filename,
-            }));
-        });
-        actions.appendChild(dlBtn);
-    }
 
     if (item.status === 'auth_required') {
         const loginBtn = document.createElement('button');
