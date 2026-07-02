@@ -1030,10 +1030,10 @@ function renderQueue() {
         const stagedCnt = queue.filter((q) => q.status === 'staged').length;
         const inProgCnt = queue.length - doneCnt - errCnt - stagedCnt;
         const parts = [];
-        if (stagedCnt) parts.push(`⏸ ${stagedCnt} ждут`);
+        if (stagedCnt) parts.push(`${stagedCnt} в очереди`);
         if (inProgCnt) parts.push(`${inProgCnt} в работе`);
-        if (doneCnt)   parts.push(`✓ ${doneCnt}`);
-        if (errCnt)    parts.push(`⚠ ${errCnt}`);
+        if (doneCnt)   parts.push(`${doneCnt} готово`);
+        if (errCnt)    parts.push(`${errCnt} ошибка`);
         $('queue-title').textContent = parts.length ? `Обработка — ${parts.join(', ')}` : 'Обработка';
     }
     for (const item of queue) {
@@ -1061,10 +1061,6 @@ function renderStagedBar() {
     }
     bar.style.display = 'flex';
     bar.innerHTML = '';
-    const label = document.createElement('div');
-    label.style.cssText = 'flex:1;min-width:200px;font-size:1.05rem';
-    label.innerHTML = `Готово к обработке: <strong>${staged.length}</strong>`;
-    bar.appendChild(label);
     const goBtn = document.createElement('button');
     goBtn.className = 'big';
     goBtn.textContent = staged.length > 1 ? 'Расшифровать всё' : 'Расшифровать';
@@ -1096,7 +1092,7 @@ function renderMergeBar() {
     label.innerHTML = `<strong>Выбрано ${selected.length}</strong> — объединить как одно заседание?`;
     bar.appendChild(label);
     const mergeBtn = document.createElement('button');
-    mergeBtn.textContent = '🔗 Объединить';
+    mergeBtn.textContent = 'Объединить';
     mergeBtn.addEventListener('click', () => mergeSelectedAsSession(selected));
     bar.appendChild(mergeBtn);
     const cancelBtn = document.createElement('button');
@@ -1307,7 +1303,7 @@ function renderQueueItem(item) {
         const hint = document.createElement('div');
         hint.className = 'queue-error-msg';
         hint.style.color = 'var(--text)';
-        hint.innerHTML = '📦 <strong>Запись сохранена в браузере</strong> — она не пропадёт. ' +
+        hint.innerHTML = '<strong>Запись сохранена в браузере</strong> — она не пропадёт. ' +
             'Откройте вход в новой вкладке, войдите, вернитесь сюда и нажмите «Попробовать снова».';
         wrap.appendChild(hint);
     }
@@ -1319,7 +1315,7 @@ function renderQueueItem(item) {
     if (item.status === 'auth_required') {
         const loginBtn = document.createElement('button');
         loginBtn.className = 'small';
-        loginBtn.textContent = '🔑 Войти';
+        loginBtn.textContent = 'Войти';
         loginBtn.addEventListener('click', () => {
             // Open login in a separate tab so this page (with the in-memory
             // file/idbId reference) stays alive and ready to retry.
@@ -1357,7 +1353,7 @@ function renderQueueItem(item) {
     if (item.expanded && item.status === 'done') {
         const warn = document.createElement('div');
         warn.className = 'warning';
-        warn.innerHTML = '⚠️ <strong>Это черновик.</strong> Правки сохраняются — скачайте .docx чтобы они попали в файл. Сверяйте с аудио: ФИО, даты, статьи УК.';
+        warn.innerHTML = '<strong>Это черновик.</strong> Правки сохраняются — скачайте .docx чтобы они попали в файл. Сверяйте с аудио: ФИО, даты, статьи УК.';
         wrap.appendChild(warn);
 
         const ta = document.createElement('textarea');
