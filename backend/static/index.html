@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Помощник секретаря</title>
+    <title>???????? ?????????</title>
 
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json">
@@ -13,7 +13,7 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Протокол">
+    <meta name="apple-mobile-web-app-title" content="????????">
     <link rel="icon" type="image/png" href="/static/icon-192.png">
     
     <!-- Google Fonts -->
@@ -242,7 +242,7 @@
         }
         details > summary::-webkit-details-marker { display: none; }
         details > summary::after {
-            content: '▼'; margin-left: auto; font-size: 0.75rem;
+            content: '?'; margin-left: auto; font-size: 0.75rem;
             color: var(--muted); transition: transform 0.2s;
         }
         details[open] > summary::after { transform: rotate(180deg); }
@@ -378,7 +378,7 @@
             padding: 0.375rem 0 0.375rem 1.5rem; position: relative;
         }
         .changelog-items li::before {
-            content: '✦'; position: absolute; left: 0; color: var(--muted);
+            content: '?'; position: absolute; left: 0; color: var(--muted);
             font-size: 0.8rem; top: 0.45rem;
         }
 
@@ -399,56 +399,56 @@
 <div class="container">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;margin-bottom:2rem">
         <div style="min-width:0;flex:1">
-            <h1>Помощник секретаря</h1>
-            <p class="subtitle">Аудиозапись заседания → черновик протокола</p>
+            <h1>???????? ?????????</h1>
+            <p class="subtitle">??????????? ????????? ? ???????? ?????????</p>
         </div>
         <div style="display:flex;gap:0.5rem;flex-shrink:0;position:relative;align-items:center">
-            <button type="button" id="bell-btn" class="bell-btn" aria-label="История изменений" title="История изменений">
-                🔔<span class="bell-badge" id="bell-badge" hidden></span>
+            <button type="button" id="bell-btn" class="bell-btn" aria-label="??????? ?????????" title="??????? ?????????">
+                <span class="bell-badge" id="bell-badge" hidden></span>
             </button>
-            <a href="/logout" id="logout-link" style="color:var(--muted);text-decoration:none;font-size:0.9rem;padding:0.6rem 1rem;border:1px solid var(--border);border-radius:8px;white-space:nowrap;display:inline-flex;align-items:center;background:rgba(255,255,255,0.05);transition:all 0.2s;font-weight:500;">Выйти</a>
+            <a href="/logout" id="logout-link" style="color:var(--muted);text-decoration:none;font-size:0.9rem;padding:0.6rem 1rem;border:1px solid var(--border);border-radius:8px;white-space:nowrap;display:inline-flex;align-items:center;background:rgba(255,255,255,0.05);transition:all 0.2s;font-weight:500;">?????</a>
         </div>
     </div>
 
     <!-- CHANGELOG popup -->
     <div id="changelog-popup" hidden>
         <div class="changelog-header">
-            <h3>История изменений</h3>
-            <button type="button" id="changelog-close-btn" class="changelog-close" aria-label="Закрыть">✕</button>
+            <h3>??????? ?????????</h3>
+            <button type="button" id="changelog-close-btn" class="changelog-close" aria-label="???????">?</button>
         </div>
         <div id="changelog-list" class="changelog-list"></div>
     </div>
 
     <!-- HISTORY -->
     <details class="card history-card" id="history-card" hidden>
-        <summary>📚 Недавние черновики <span id="history-count" class="meta" style="margin:0;margin-left:0.5rem;color:var(--accent);"></span></summary>
+        <summary>???????? ????????? <span id="history-count" class="meta" style="margin:0;margin-left:0.5rem;color:var(--accent);"></span></summary>
         <div class="history-list" id="history-list"></div>
     </details>
 
-    <!-- METADATA -->
-    <details class="card meta-card" id="meta-card">
-        <summary>📋 Данные дела (необязательно)</summary>
+    <!-- METADATA (Hidden as requested) -->
+    <details class="card meta-card" id="meta-card" style="display: none;">
+        <summary>?????? ???? (?????????????)</summary>
         <div class="meta-fields">
             <div>
-                <label for="meta-case">Номер дела</label>
-                <input id="meta-case" type="text" placeholder="например, 1-123/2026" autocomplete="off">
+                <label for="meta-case">????? ????</label>
+                <input id="meta-case" type="text" placeholder="????????, 1-123/2026" autocomplete="off">
             </div>
             <div>
-                <label for="meta-defendant">ФИО подсудимого</label>
-                <input id="meta-defendant" type="text" placeholder="например, Иванов Иван Иванович" autocomplete="off">
+                <label for="meta-defendant">??? ???????????</label>
+                <input id="meta-defendant" type="text" placeholder="????????, ?????? ???? ????????" autocomplete="off">
             </div>
             <div>
-                <label for="meta-statute">Статья УК</label>
-                <input id="meta-statute" type="text" placeholder="например, 158 ч. 2 п. в" autocomplete="off">
+                <label for="meta-statute">?????? ??</label>
+                <input id="meta-statute" type="text" placeholder="????????, 158 ?. 2 ?. ?" autocomplete="off">
             </div>
             <div>
-                <label for="meta-judge">Председательствующий</label>
-                <input id="meta-judge" type="text" list="judges-list" placeholder="например, Сидоров В.А." autocomplete="off">
+                <label for="meta-judge">????????????????????</label>
+                <input id="meta-judge" type="text" list="judges-list" placeholder="????????, ????????? ?.?." autocomplete="off">
                 <datalist id="judges-list">
-                    <option value="Сидоров В.А.">
-                    <option value="Кузнецов М.И.">
+                    <option value="????????? ?.?.">
+                    <option value="??????? ?.?.">
                 </datalist>
-                <p class="meta-note">По умолчанию — Сидоров В.А.</p>
+                <p class="meta-note">?? ????????? - ????????? ?.?.</p>
             </div>
         </div>
     </details>
@@ -456,47 +456,47 @@
     <!-- IDLE: pick file(s) OR record -->
     <div class="card" id="upload-card">
         <div id="drop-zone">
-            <p>Перетащите файлы сюда</p>
-            <p class="hint">mp3 · wav · m4a · mp4 · ogg · webm</p>
+            <p>?????????? ????? ????</p>
+            <p class="hint">mp3 � wav � m4a � mp4 � ogg � webm</p>
             <input type="file" id="file-input" accept="audio/*,video/mp4,.m4a,.webm" multiple>
         </div>
         <div class="row">
-            <button id="pick-btn" class="secondary big">📁 Выбрать файл(ы)</button>
+            <button id="pick-btn" class="secondary big">??????? ????(?)</button>
         </div>
-        <div class="divider">или</div>
-        <div class="row">
-            <button id="record-btn" class="big">🎙 Записать заседание</button>
+        <!-- Recording button hidden -->
+        <div class="row" style="display: none;">
+            <button id="record-btn" class="big">???????? ?????????</button>
         </div>
     </div>
 
     <!-- RECORDING -->
     <div class="card" id="recording-card" hidden style="text-align:center; padding: 3rem 1.5rem;">
-        <p style="font-size: 1.1rem; color: var(--text);"><span class="rec-indicator"></span><strong style="letter-spacing: 1px; text-transform: uppercase;">Идёт запись</strong></p>
+        <p style="font-size: 1.1rem; color: var(--text);"><span class="rec-indicator"></span><strong style="letter-spacing: 1px; text-transform: uppercase;">???? ??????</strong></p>
         <div class="rec-timer" id="rec-timer">00:00</div>
         <div class="rec-warning">
-            ⚠️ Не закрывайте приложение и не блокируйте экран
+            ?? ?????????? ?????????? ? ?? ?????????? ?????
         </div>
         <div class="row" style="margin-top: 2rem;">
-            <button id="stop-rec-btn" class="danger big">⏹ Остановить запись</button>
+            <button id="stop-rec-btn" class="danger big">?????????? ??????</button>
         </div>
     </div>
 
     <!-- QUEUE -->
     <div class="card" id="queue-card" hidden>
-        <h2 id="queue-title">Обработка</h2>
+        <h2 id="queue-title">?????????</h2>
         <div id="queue-list"></div>
         <div class="row" style="margin-top: 1.5rem;">
-            <button id="add-more-btn" class="secondary">+ Добавить файл</button>
-            <button id="add-more-record-btn" class="secondary">🎙 Записать ещё</button>
-            <button id="clear-queue-btn" class="secondary">Очистить</button>
+            <button id="add-more-btn" class="secondary">+ ???????? ????</button>
+            <button id="add-more-record-btn" class="secondary" style="display: none;">???????? ???</button>
+            <button id="clear-queue-btn" class="secondary">????????</button>
         </div>
     </div>
 
     <!-- ERROR -->
     <div class="card" id="error-card" hidden>
-        <h2 class="error-msg">Ошибка</h2>
+        <h2 class="error-msg">??????</h2>
         <p id="error-text" style="margin-bottom:1.5rem;"></p>
-        <button class="secondary" onclick="location.reload()">↻ Попробовать снова</button>
+        <button class="secondary" onclick="location.reload()">? ??????????? ?????</button>
     </div>
 </div>
 
@@ -512,7 +512,7 @@ const HISTORY_LIMIT = 25;
 const METADATA_KEY = 'judge-helper:metadata-draft-v1';
 
 // 401 from a protected endpoint = session expired. We DO NOT redirect
-// automatically anymore — that would destroy any unsaved recording held in
+// automatically anymore - that would destroy any unsaved recording held in
 // page memory. Instead we set a global flag; upload code shows an inline
 // "log in" prompt next to the affected queue item.
 let sessionExpired = false;
@@ -648,8 +648,8 @@ function renderHistory() {
         const dateStr = date.toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: 'numeric' })
             + ' ' + date.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
         const meta = entry.metadata || {};
-        const title = meta.defendant || meta.case_number || entry.filename || 'Без названия';
-        const subtitle = `${dateStr} · ${entry.duration_min ?? '—'} мин`;
+        const title = meta.defendant || meta.case_number || entry.filename || '??? ????????';
+        const subtitle = `${dateStr} � ${entry.duration_min ?? '-'} ???`;
         const info = document.createElement('div');
         info.className = 'history-info';
         const strong = document.createElement('strong');
@@ -663,19 +663,19 @@ function renderHistory() {
         actions.className = 'history-actions';
         const openBtn = document.createElement('button');
         openBtn.className = 'secondary small';
-        openBtn.textContent = 'Открыть';
+        openBtn.textContent = '???????';
         openBtn.addEventListener('click', () => openHistoryEntry(entry));
         const dlBtn = document.createElement('button');
         dlBtn.className = 'small';
-        dlBtn.textContent = '⬇';
-        dlBtn.title = 'Скачать .docx';
+        dlBtn.textContent = '?';
+        dlBtn.title = '??????? .docx';
         dlBtn.addEventListener('click', () => downloadDocx(entry.draft, makeFilename(entry)));
         const delBtn = document.createElement('button');
         delBtn.className = 'secondary small';
-        delBtn.textContent = '✕';
-        delBtn.title = 'Удалить';
+        delBtn.textContent = '?';
+        delBtn.title = '???????';
         delBtn.addEventListener('click', () => {
-            if (confirm('Удалить этот черновик из истории?')) deleteFromHistory(entry.id);
+            if (confirm('??????? ???? ???????? ?? ????????')) deleteFromHistory(entry.id);
         });
         actions.appendChild(openBtn);
         actions.appendChild(dlBtn);
@@ -704,8 +704,8 @@ function openHistoryEntry(entry) {
     const item = {
         key: 'h_' + entry.id,
         file: null,
-        filename: entry.filename || 'Из истории',
-        sizeMB: '—',
+        filename: entry.filename || '?? ???????',
+        sizeMB: '-',
         metadata: entry.metadata || {},
         status: 'done',
         draft: entry.draft,
@@ -786,7 +786,7 @@ function addFilesToQueue(files, opts = {}) {
             sizeMB: (f.size / 1024 / 1024).toFixed(1),
             metadata: { ...meta },
             idbId: opts.idbId || null,  // set for browser-recorded blobs
-            status: 'staged',  // NOT auto-processed — user must click "Расшифровать"
+            status: 'staged',  // NOT auto-processed - user must click "????????????"
             progress: 0,
         };
         queue.push(item);
@@ -810,7 +810,7 @@ async function processQueueItem(item) {
         pollQueueItem(item);
     } catch (err) {
         if (err && err.code === 'AUTH') {
-            // Session expired — DO NOT redirect, blob still in IDB. Show
+            // Session expired - DO NOT redirect, blob still in IDB. Show
             // inline prompt with login link + retry button.
             item.status = 'auth_required';
             item.error = err.message;
@@ -837,7 +837,7 @@ function pollQueueItem(item) {
                 if (failures >= MAX_FAILURES) {
                     clearInterval(item.pollTimer);
                     item.status = 'error';
-                    item.error = `Сервер не отвечает (HTTP ${resp.status})`;
+                    item.error = `?????? ?? ???????? (HTTP ${resp.status})`;
                     renderQueue();
                     releaseWakeLockIfDone();
                 }
@@ -861,7 +861,7 @@ function pollQueueItem(item) {
                     draft: item.draft,
                     model: item.model,
                 });
-                // Upload succeeded — safe to drop the IDB backup
+                // Upload succeeded - safe to drop the IDB backup
                 if (item.idbId) {
                     deleteRecordingFromIDB(item.idbId).catch((e) => console.warn('IDB delete', e));
                     item.idbId = null;
@@ -869,7 +869,7 @@ function pollQueueItem(item) {
                 renderQueue();
                 releaseWakeLockIfDone();
             } else if (data.status === 'transcribed') {
-                // Part of a multi-part session — transcribed but not drafted.
+                // Part of a multi-part session - transcribed but not drafted.
                 // Stop polling, mark as ready for merging.
                 clearInterval(item.pollTimer);
                 item.status = 'transcribed';
@@ -880,7 +880,7 @@ function pollQueueItem(item) {
             } else if (data.status === 'error') {
                 clearInterval(item.pollTimer);
                 item.status = 'error';
-                item.error = data.error || 'Неизвестная ошибка';
+                item.error = data.error || '??????????? ??????';
                 renderQueue();
                 releaseWakeLockIfDone();
             } else {
@@ -899,7 +899,7 @@ function pollQueueItem(item) {
             if (failures >= MAX_FAILURES) {
                 clearInterval(item.pollTimer);
                 item.status = 'error';
-                item.error = 'Не удалось получить статус.';
+                item.error = '?? ??????? ???????? ??????.';
                 renderQueue();
                 releaseWakeLockIfDone();
             }
@@ -932,9 +932,9 @@ function uploadFile(item) {
         };
         xhr.onload = () => {
             if (xhr.status === 401) {
-                // DO NOT redirect — that would lose the in-memory blob. Caller
+                // DO NOT redirect - that would lose the in-memory blob. Caller
                 // shows inline auth prompt; recording stays in IndexedDB.
-                const err = new Error('Сессия истекла. Войдите снова в новой вкладке и нажмите «Попробовать снова».');
+                const err = new Error('?????? ???????. ??????? ????? ? ????? ??????? ? ??????? �??????????? ?????�.');
                 err.code = 'AUTH';
                 reject(err);
                 return;
@@ -944,7 +944,7 @@ function uploadFile(item) {
                     const data = JSON.parse(xhr.responseText);
                     resolve(data.job_id);
                 } catch (e) {
-                    reject(new Error('Сервер вернул битый ответ'));
+                    reject(new Error('?????? ?????? ????? ?????'));
                 }
             } else {
                 let msg = `HTTP ${xhr.status}`;
@@ -955,9 +955,9 @@ function uploadFile(item) {
                 reject(new Error(msg));
             }
         };
-        xhr.onerror = () => reject(new Error('Нет соединения с сервером. Проверьте интернет.'));
-        xhr.ontimeout = () => reject(new Error('Сервер не ответил за 10 минут. Попробуйте файл поменьше.'));
-        xhr.onabort = () => reject(new Error('Загрузка прервана'));
+        xhr.onerror = () => reject(new Error('??? ?????????? ? ????????. ????????? ????????.'));
+        xhr.ontimeout = () => reject(new Error('?????? ?? ??????? ?? 10 ?????. ?????????? ???? ????????.'));
+        xhr.onabort = () => reject(new Error('???????? ????????'));
         xhr.open('POST', `${BACKEND}/upload`);
         xhr.send(form);
     });
@@ -968,17 +968,17 @@ function uploadFile(item) {
 // =========================================================================
 function phaseLabel(phase) {
     return {
-        'uploading_to_aai': 'Передача файла на расшифровку…',
-        'transcribing':     'Расшифровка аудио…',
-        'drafting':         'Составление черновика протокола…',
-    }[phase] || 'Обработка…';
+        'uploading_to_aai': '???????? ????? ?? ???????????.',
+        'transcribing':     '??????????? ?????.',
+        'drafting':         '??????????? ????????? ?????????.',
+    }[phase] || '?????????.';
 }
 
 // Estimate transcription progress. Returns { elapsedSec, estimatedSec, pct } or null
 // when we don't yet have audio_duration from AssemblyAI.
 //
 // Empirical multiplier 0.3 = AssemblyAI universal-2 + Russian + diarization runs
-// at roughly 30% of audio duration (per user-guide.md "1-5 мин на 10 мин записи").
+// at roughly 30% of audio duration (per user-guide.md "1-5 ??? ?? 10 ??? ??????").
 // Clamp to [60s, 600s] so a 30-second snippet doesn't get a "8s ETA" jitter,
 // and a 5-hour recording doesn't promise 90 minutes either.
 function estimateTranscribing(item) {
@@ -986,7 +986,7 @@ function estimateTranscribing(item) {
     const nowSec = Date.now() / 1000;
     const elapsedSec = Math.max(0, Math.round(nowSec - item.aai_started_at));
     const estimatedSec = Math.max(60, Math.min(600, Math.round(item.audio_duration_sec * 0.3)));
-    // Cap at 98% — last 2% reserved for the "done" transition so the bar never
+    // Cap at 98% - last 2% reserved for the "done" transition so the bar never
     // sits at 100% with the spinner still spinning (bad UX).
     const pct = Math.min(98, (elapsedSec / estimatedSec) * 100);
     return { elapsedSec, estimatedSec, pct };
@@ -1011,18 +1011,18 @@ function renderQueue() {
     const list = $('queue-list');
     list.innerHTML = '';
     if (queue.length === 0) {
-        $('queue-title').textContent = 'Очередь пуста';
+        $('queue-title').textContent = '??????? ?????';
     } else {
         const doneCnt = queue.filter((q) => q.status === 'done').length;
         const errCnt  = queue.filter((q) => q.status === 'error').length;
         const stagedCnt = queue.filter((q) => q.status === 'staged').length;
         const inProgCnt = queue.length - doneCnt - errCnt - stagedCnt;
         const parts = [];
-        if (stagedCnt) parts.push(`⏸ ${stagedCnt} ждут`);
-        if (inProgCnt) parts.push(`${inProgCnt} в работе`);
-        if (doneCnt)   parts.push(`✓ ${doneCnt}`);
-        if (errCnt)    parts.push(`⚠ ${errCnt}`);
-        $('queue-title').textContent = parts.length ? `Обработка — ${parts.join(', ')}` : 'Обработка';
+        if (stagedCnt) parts.push(`? ${stagedCnt} ????`);
+        if (inProgCnt) parts.push(`${inProgCnt} ? ??????`);
+        if (doneCnt)   parts.push(`? ${doneCnt}`);
+        if (errCnt)    parts.push(`? ${errCnt}`);
+        $('queue-title').textContent = parts.length ? `????????? - ${parts.join(', ')}` : '?????????';
     }
     for (const item of queue) {
         list.appendChild(renderQueueItem(item));
@@ -1051,10 +1051,10 @@ function renderStagedBar() {
     bar.innerHTML = '';
     const label = document.createElement('div');
     label.style.cssText = 'flex:1;min-width:200px';
-    label.innerHTML = `<strong>${staged.length} записей ждут обработки</strong> — расшифровать все сразу?`;
+    label.innerHTML = `<strong>${staged.length} ??????? ???? ?????????</strong> - ???????????? ??? ??????`;
     bar.appendChild(label);
     const goBtn = document.createElement('button');
-    goBtn.textContent = '▶ Расшифровать всё';
+    goBtn.textContent = '? ???????????? ???';
     goBtn.addEventListener('click', () => {
         staged.forEach((s) => processQueueItem(s));
     });
@@ -1080,15 +1080,15 @@ function renderMergeBar() {
     bar.innerHTML = '';
     const label = document.createElement('div');
     label.style.cssText = 'flex:1;min-width:200px';
-    label.innerHTML = `<strong>Выбрано ${selected.length}</strong> — объединить как одно заседание?`;
+    label.innerHTML = `<strong>??????? ${selected.length}</strong> - ?????????? ??? ???? ??????????`;
     bar.appendChild(label);
     const mergeBtn = document.createElement('button');
-    mergeBtn.textContent = '🔗 Объединить';
+    mergeBtn.textContent = '?? ??????????';
     mergeBtn.addEventListener('click', () => mergeSelectedAsSession(selected));
     bar.appendChild(mergeBtn);
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'secondary';
-    cancelBtn.textContent = 'Отмена';
+    cancelBtn.textContent = '??????';
     cancelBtn.addEventListener('click', () => {
         queue.forEach((q) => q.selected = false);
         renderQueue();
@@ -1099,7 +1099,7 @@ function renderMergeBar() {
 async function mergeSelectedAsSession(selected) {
     const transcriptIds = selected.map((s) => s.jobId).filter(Boolean);
     if (transcriptIds.length < 2) {
-        alert('Не удалось определить ID частей. Подождите пока все записи получат transcript_id.');
+        alert('?? ??????? ?????????? ID ??????. ????????? ???? ??? ?????? ??????? transcript_id.');
         return;
     }
     // Deselect originals
@@ -1108,8 +1108,8 @@ async function mergeSelectedAsSession(selected) {
     // Create a new session-item in the queue
     const sessionItem = {
         key: 'ses_' + Math.random().toString(36).slice(2, 10),
-        filename: `Заседание из ${transcriptIds.length} частей`,
-        sizeMB: '—',
+        filename: `????????? ?? ${transcriptIds.length} ??????`,
+        sizeMB: '-',
         metadata: selected[0]?.metadata || {},
         status: 'processing',
         phase: 'drafting',
@@ -1156,13 +1156,13 @@ function renderQueueItem(item) {
     const head = document.createElement('div');
     head.className = 'queue-item-head';
 
-    // Selection checkbox — only for items that are done/transcribed (eligible
+    // Selection checkbox - only for items that are done/transcribed (eligible
     // to merge into one session). Sessions themselves are not selectable.
     if ((item.status === 'done' || item.status === 'transcribed') && !item.isSession) {
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.checked = !!item.selected;
-        cb.title = 'Выбрать для объединения с другими частями';
+        cb.title = '??????? ??? ??????????? ? ??????? ???????';
         cb.style.cssText = 'margin-right:0.5rem;width:20px;height:20px;flex-shrink:0;cursor:pointer';
         cb.addEventListener('change', () => {
             item.selected = cb.checked;
@@ -1173,12 +1173,12 @@ function renderQueueItem(item) {
 
     const name = document.createElement('div');
     name.className = 'queue-name';
-    name.textContent = (item.isSession ? '🔗 ' : '🎵 ') + item.filename;
+    name.textContent = (item.isSession ? '?? ' : '?? ') + item.filename;
     head.appendChild(name);
-    if (item.sizeMB && item.sizeMB !== '—') {
+    if (item.sizeMB && item.sizeMB !== '-') {
         const size = document.createElement('span');
         size.className = 'queue-size';
-        size.textContent = item.sizeMB + ' МБ';
+        size.textContent = item.sizeMB + ' ??';
         head.appendChild(size);
     }
     wrap.appendChild(head);
@@ -1190,8 +1190,8 @@ function renderQueueItem(item) {
         const sp = document.createElement('div'); sp.className = 'spinner'; status.appendChild(sp);
         const t = document.createElement('span');
         t.textContent = item.uploadDone
-            ? 'Получение ответа сервера…'
-            : `Загрузка файла… ${item.progress}%`;
+            ? '????????? ?????? ???????.'
+            : `???????? ?????. ${item.progress}%`;
         status.appendChild(t);
     } else if (item.status === 'processing') {
         const sp = document.createElement('div'); sp.className = 'spinner'; status.appendChild(sp);
@@ -1199,38 +1199,38 @@ function renderQueueItem(item) {
         const elapsed = phaseElapsedSec(item);
         const est = item.phase === 'transcribing' ? estimateTranscribing(item) : null;
         let suffix = elapsed ? ` (${formatHMS(elapsed)}` : '';
-        if (est) suffix += ` из ≈${formatHMS(est.estimatedSec)}`;
+        if (est) suffix += ` ?? ?${formatHMS(est.estimatedSec)}`;
         suffix += elapsed ? ')' : '';
         t.textContent = phaseLabel(item.phase) + suffix;
         status.appendChild(t);
     } else if (item.status === 'done') {
         const t = document.createElement('span');
         t.className = 'badge-done';
-        t.innerHTML = `✓ Готово · ${item.duration_min ?? '—'} мин · ${(item.draft?.length || 0).toLocaleString('ru')} символов`;
+        t.innerHTML = `? ?????? � ${item.duration_min ?? '-'} ??? � ${(item.draft?.length || 0).toLocaleString('ru')} ????????`;
         status.appendChild(t);
     } else if (item.status === 'transcribed') {
         const t = document.createElement('span');
         t.className = 'badge-done';
-        t.textContent = `✓ Расшифровано · ${item.duration_min ?? '—'} мин · готово к объединению`;
+        t.textContent = `? ???????????? � ${item.duration_min ?? '-'} ??? � ?????? ? ???????????`;
         status.appendChild(t);
     } else if (item.status === 'auth_required') {
         const t = document.createElement('span');
         t.className = 'badge-error';
-        t.textContent = '🔒 Войдите заново';
+        t.textContent = '?? ??????? ??????';
         status.appendChild(t);
     } else if (item.status === 'error') {
         const t = document.createElement('span');
         t.className = 'badge-error';
-        t.textContent = '⚠ Ошибка';
+        t.textContent = '? ??????';
         status.appendChild(t);
     } else if (item.status === 'staged') {
         const t = document.createElement('span');
         t.style.color = 'var(--muted)';
-        t.textContent = '⏸ Готов к обработке';
+        t.textContent = '? ????? ? ?????????';
         status.appendChild(t);
     } else {
         const t = document.createElement('span');
-        t.textContent = 'В очереди…';
+        t.textContent = '? ???????.';
         status.appendChild(t);
     }
     wrap.appendChild(status);
@@ -1270,8 +1270,8 @@ function renderQueueItem(item) {
         const hint = document.createElement('div');
         hint.className = 'queue-error-msg';
         hint.style.color = 'var(--text)';
-        hint.innerHTML = '📦 <strong>Запись сохранена в браузере</strong> — она не пропадёт. ' +
-            'Откройте вход в новой вкладке, войдите, вернитесь сюда и нажмите «Попробовать снова».';
+        hint.innerHTML = '?? <strong>?????? ????????? ? ????????</strong> - ??? ?? ????????. ' +
+            '???????? ???? ? ????? ???????, ???????, ????????? ???? ? ??????? �??????????? ?????�.';
         wrap.appendChild(hint);
     }
 
@@ -1282,7 +1282,7 @@ function renderQueueItem(item) {
     if (item.status === 'staged') {
         const goBtn = document.createElement('button');
         goBtn.className = 'small';
-        goBtn.textContent = '▶ Расшифровать';
+        goBtn.textContent = '? ????????????';
         goBtn.addEventListener('click', () => {
             processQueueItem(item);
         });
@@ -1292,8 +1292,8 @@ function renderQueueItem(item) {
         // session, they can mark it so it doesn't generate an individual draft.
         const partBtn = document.createElement('button');
         partBtn.className = 'secondary small';
-        partBtn.textContent = item.markAsPart ? '🔗 Часть заседания ✓' : '🔗 Часть заседания';
-        partBtn.title = 'Если это часть записи с перерывом — поставьте отметку, и черновик будет генерироваться один раз для всех частей вместе';
+        partBtn.textContent = item.markAsPart ? '?? ????? ????????? ?' : '?? ????? ?????????';
+        partBtn.title = '???? ??? ????? ?????? ? ????????? - ????????? ???????, ? ???????? ????? ?????????????? ???? ??? ??? ???? ?????? ??????';
         partBtn.addEventListener('click', () => {
             item.markAsPart = !item.markAsPart;
             renderQueue();
@@ -1302,7 +1302,7 @@ function renderQueueItem(item) {
 
         const removeBtn = document.createElement('button');
         removeBtn.className = 'secondary small';
-        removeBtn.textContent = '✕ Убрать';
+        removeBtn.textContent = '? ??????';
         removeBtn.addEventListener('click', () => {
             if (item.idbId) deleteRecordingFromIDB(item.idbId).catch(() => {});
             queue = queue.filter((q) => q.key !== item.key);
@@ -1315,7 +1315,7 @@ function renderQueueItem(item) {
     if (item.status === 'done') {
         const expandBtn = document.createElement('button');
         expandBtn.className = 'small';
-        expandBtn.textContent = item.expanded ? 'Свернуть' : '✏ Открыть и править';
+        expandBtn.textContent = item.expanded ? '????????' : '? ??????? ? ???????';
         expandBtn.addEventListener('click', () => {
             item.expanded = !item.expanded;
             renderQueue();
@@ -1324,7 +1324,7 @@ function renderQueueItem(item) {
 
         const dlBtn = document.createElement('button');
         dlBtn.className = 'small';
-        dlBtn.textContent = '⬇ Скачать .docx';
+        dlBtn.textContent = '? ??????? .docx';
         dlBtn.addEventListener('click', async () => {
             const text = item.expanded
                 ? (document.getElementById('draft-' + item.key)?.value || item.draft)
@@ -1339,17 +1339,17 @@ function renderQueueItem(item) {
 
         const copyBtn = document.createElement('button');
         copyBtn.className = 'secondary small';
-        copyBtn.textContent = 'Скопировать';
+        copyBtn.textContent = '???????????';
         copyBtn.addEventListener('click', async () => {
             const text = item.expanded
                 ? (document.getElementById('draft-' + item.key)?.value || item.draft)
                 : item.draft;
             try {
                 await navigator.clipboard.writeText(text);
-                copyBtn.textContent = 'Скопировано ✓';
-                setTimeout(() => { copyBtn.textContent = 'Скопировать'; }, 1500);
+                copyBtn.textContent = '??????????? ?';
+                setTimeout(() => { copyBtn.textContent = '???????????'; }, 1500);
             } catch (e) {
-                alert('Не удалось. Выделите текст вручную.');
+                alert('?? ???????. ???????? ????? ???????.');
             }
         });
         actions.appendChild(copyBtn);
@@ -1358,7 +1358,7 @@ function renderQueueItem(item) {
     if (item.status === 'auth_required') {
         const loginBtn = document.createElement('button');
         loginBtn.className = 'small';
-        loginBtn.textContent = '🔑 Войти';
+        loginBtn.textContent = '?? ?????';
         loginBtn.addEventListener('click', () => {
             // Open login in a separate tab so this page (with the in-memory
             // file/idbId reference) stays alive and ready to retry.
@@ -1368,7 +1368,7 @@ function renderQueueItem(item) {
 
         const retryBtn = document.createElement('button');
         retryBtn.className = 'secondary small';
-        retryBtn.textContent = '↻ Попробовать снова';
+        retryBtn.textContent = '? ??????????? ?????';
         retryBtn.addEventListener('click', async () => {
             // If we have the in-memory File, just retry; otherwise reload from IDB.
             if (!item.file && item.idbId) {
@@ -1379,7 +1379,7 @@ function renderQueueItem(item) {
                     }
                 } catch (e) {
                     item.status = 'error';
-                    item.error = 'Не удалось восстановить запись из памяти браузера';
+                    item.error = '?? ??????? ???????????? ?????? ?? ?????? ????????';
                     renderQueue();
                     return;
                 }
@@ -1393,9 +1393,9 @@ function renderQueueItem(item) {
     if (item.status === 'error' || item.status === 'done' || item.status === 'auth_required') {
         const rmBtn = document.createElement('button');
         rmBtn.className = 'secondary small';
-        rmBtn.textContent = '✕ Убрать';
+        rmBtn.textContent = '? ??????';
         rmBtn.addEventListener('click', () => {
-            // For auth_required also drop the IDB entry — user is abandoning
+            // For auth_required also drop the IDB entry - user is abandoning
             if (item.idbId && item.status !== 'done') {
                 deleteRecordingFromIDB(item.idbId).catch(() => {});
             }
@@ -1415,7 +1415,7 @@ function renderQueueItem(item) {
     if (item.expanded && item.status === 'done') {
         const warn = document.createElement('div');
         warn.className = 'warning';
-        warn.innerHTML = '⚠️ <strong>Это черновик.</strong> Правки сохраняются — скачайте .docx чтобы они попали в файл. Сверяйте с аудио: ФИО, даты, статьи УК.';
+        warn.innerHTML = '?? <strong>??? ????????.</strong> ?????? ??????????? - ???????? .docx ????? ??? ?????? ? ????. ???????? ? ?????: ???, ????, ?????? ??.';
         wrap.appendChild(warn);
 
         const ta = document.createElement('textarea');
@@ -1442,7 +1442,7 @@ function formatHMS(s) {
 }
 
 // Update timers periodically while items are in 'processing'.
-// Skip while user is editing — otherwise the textarea gets recreated
+// Skip while user is editing - otherwise the textarea gets recreated
 // on every tick and we lose cursor / selection / scroll position.
 setInterval(() => {
     const editing = document.activeElement && (
@@ -1493,13 +1493,13 @@ let prevCardBeforeRecording = 'upload-card';
 
 async function startRecording() {
     if (!navigator.mediaDevices || !window.MediaRecorder) {
-        showError('Этот браузер не поддерживает запись звука. Попробуйте Safari (iPhone) или Chrome.');
+        showError('???? ??????? ?? ???????????? ?????? ?????. ?????????? Safari (iPhone) ??? Chrome.');
         return;
     }
     try {
         recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
-        showError('Не удалось получить доступ к микрофону. Разрешите доступ в настройках.');
+        showError('?? ??????? ???????? ?????? ? ?????????. ????????? ?????? ? ??????????.');
         return;
     }
     const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac'];
@@ -1513,7 +1513,7 @@ async function startRecording() {
             ? new MediaRecorder(recordingStream, { mimeType })
             : new MediaRecorder(recordingStream);
     } catch (err) {
-        showError('Не удалось запустить запись: ' + err.message);
+        showError('?? ??????? ????????? ??????: ' + err.message);
         recordingStream.getTracks().forEach((t) => t.stop());
         return;
     }
@@ -1559,13 +1559,13 @@ async function onRecordingStopped() {
     const metadata = getMetadataFromForm();
 
     // CRITICAL: persist the blob to IndexedDB IMMEDIATELY. Even if the
-    // browser crashes, the network drops, or auth fails — the recording is
+    // browser crashes, the network drops, or auth fails - the recording is
     // safe on disk and can be recovered next time the page loads.
     let idbId = null;
     try {
         idbId = await saveRecordingToIDB(blob, filename, mimeType, metadata);
     } catch (e) {
-        console.error('IDB save failed — recording exists only in memory:', e);
+        console.error('IDB save failed - recording exists only in memory:', e);
     }
 
     const file = new File([blob], filename, { type: mimeType });
@@ -1659,72 +1659,72 @@ function showError(msg) {
 const CHANGELOG_KEY = 'judge-helper:changelog-last-seen';
 
 // Add new entries at the TOP. Bump 'version' on each release.
-// Date format: 'YYYY-MM-DD' or 'DD месяца YYYY' — kept consistent for readability.
+// Date format: 'YYYY-MM-DD' or 'DD ?????? YYYY' - kept consistent for readability.
 const CHANGELOG = [
     {
         version: 8,
-        date: '23 мая 2026',
+        date: '23 ??? 2026',
         items: [
-            'Прогресс расшифровки показывает реальное время: «Расшифровка аудио… (1:23 из ≈3:30)» и заполняющаяся полоска. Видно сколько ждать.',
-            'Сервер запоминает текущие задачи на диск — если случайно перезапустится (обновление, сбой), черновики и расшифровки не пропадают.',
+            '???????? ??????????? ?????????? ???????? ?????: �??????????? ?????. (1:23 ?? ?3:30)� ? ????????????? ???????. ????? ??????? ?????.',
+            '?????? ?????????? ??????? ?????? ?? ???? - ???? ???????? ?????????????? (??????????, ????), ????????? ? ??????????? ?? ?????????.',
         ],
     },
     {
         version: 7,
-        date: '22 мая 2026',
+        date: '22 ??? 2026',
         items: [
-            'История изменений переехала в колокольчик 🔔 справа сверху — не занимает экран. Все прошлые обновления тоже здесь.',
+            '??????? ????????? ????????? ? ??????????? ?? ?????? ?????? - ?? ???????? ?????. ??? ??????? ?????????? ???? ?????.',
         ],
     },
     {
         version: 6,
-        date: '22 мая 2026',
+        date: '22 ??? 2026',
         items: [
-            'Запись больше не отправляется автоматически после нажатия «Стоп» — попадает в очередь со статусом «Готов к обработке», вы нажимаете «▶ Расшифровать» когда готовы.',
-            'Можно сразу обработать пачку — кнопка «▶ Расшифровать всё» появляется когда 2+ записей ждут.',
-            'Заседание с перерывом: загрузите обе части, дождитесь когда обе ✓ готовы, поставьте галочки слева → жмите «🔗 Объединить» → получится один цельный протокол.',
+            '?????? ?????? ?? ???????????? ????????????? ????? ??????? �????� - ???????? ? ??????? ?? ???????? �????? ? ?????????�, ?? ????????? �? ????????????� ????? ??????.',
+            '????? ????? ?????????? ????? - ?????? �? ???????????? ???� ?????????? ????? 2+ ??????? ????.',
+            '????????? ? ?????????: ????????? ??? ?????, ????????? ????? ??? ? ??????, ????????? ??????? ????? ? ????? �?? ??????????� ? ????????? ???? ??????? ????????.',
         ],
     },
     {
         version: 5,
-        date: '22 мая 2026',
+        date: '22 ??? 2026',
         items: [
-            'Добавлено 5 новых образцов разных типов заседаний (особый порядок, апелляция, общий процесс, многоэпизодное дело с приговором, отложение) — помощник точнее угадывает стилистику под тип процесса.',
-            'Шрифт черновика — Times New Roman.',
+            '????????? 5 ????? ???????? ?????? ????? ????????? (?????? ???????, ?????????, ????? ???????, ?????????????? ???? ? ??????????, ?????????) - ???????? ?????? ????????? ?????????? ??? ??? ????????.',
+            '????? ????????? - Times New Roman.',
         ],
     },
     {
         version: 4,
-        date: '21 мая 2026',
+        date: '21 ??? 2026',
         items: [
-            '«ПРОВЕРИТЬ ПЕРЕД СДАЧЕЙ» — короткий чек-лист в конце черновика со списком ключевых фактов (ФИО, статья, сумма, решение). Сверьте только эти строки с аудио — не нужно перечитывать весь протокол.',
-            'Шапка протокола заполняется автоматически — помощник слышит в начале заседания номер дела, ФИО подсудимого, статью УК. Поля «Данные дела» нужны только если в записи реквизиты не озвучены.',
+            '�????????? ????? ??????� - ???????? ???-???? ? ????? ????????? ?? ??????? ???????? ?????? (???, ??????, ?????, ???????). ??????? ?????? ??? ?????? ? ????? - ?? ????? ???????????? ???? ????????.',
+            '????? ????????? ??????????? ????????????? - ???????? ?????? ? ?????? ????????? ????? ????, ??? ???????????, ?????? ??. ???? �?????? ????� ????? ?????? ???? ? ?????? ????????? ?? ????????.',
         ],
     },
     {
         version: 3,
-        date: '20 мая 2026',
+        date: '20 ??? 2026',
         items: [
-            'Личный доступ по логину и паролю — посторонние без пароля не зайдут. Браузер запоминает на месяц.',
-            'Кнопка «Выйти» в правом верхнем углу.',
+            '?????? ?????? ?? ?????? ? ?????? - ??????????? ??? ?????? ?? ??????. ??????? ?????????? ?? ?????.',
+            '?????? �?????� ? ?????? ??????? ????.',
         ],
     },
     {
         version: 2,
-        date: '20 мая 2026',
+        date: '20 ??? 2026',
         items: [
-            'Автосохранение полей «Данные дела» и правок черновика — закрыли страницу случайно, всё на месте.',
-            'История последних черновиков сохраняется на устройстве.',
+            '?????????????? ????? �?????? ????� ? ?????? ????????? - ??????? ???????? ????????, ??? ?? ?????.',
+            '??????? ????????? ?????????? ??????????? ?? ??????????.',
         ],
     },
     {
         version: 1,
-        date: '18 мая 2026',
+        date: '18 ??? 2026',
         items: [
-            'Запись прямо с телефона — кнопка «🎙 Записать заседание».',
-            'Несколько файлов сразу — обрабатываются параллельно.',
-            'Правка черновика прямо в браузере перед скачиванием .docx.',
-            'Можно установить иконку на главный экран (через «Поделиться» → «На экран Домой»).',
+            '?????? ????? ? ???????? - ?????? �?? ???????? ?????????�.',
+            '????????? ?????? ????? - ?????????????? ???????????.',
+            '?????? ????????? ????? ? ???????? ????? ??????????? .docx.',
+            '????? ?????????? ?????? ?? ??????? ????? (????? �??????????� ? �?? ????? ?????�).',
         ],
     },
 ];
@@ -1764,7 +1764,7 @@ function renderChangelog() {
         head.className = 'changelog-entry-head';
         const ver = document.createElement('span');
         ver.className = 'changelog-version';
-        ver.textContent = `Версия ${entry.version}`;
+        ver.textContent = `?????? ${entry.version}`;
         head.appendChild(ver);
         const date = document.createElement('span');
         date.className = 'changelog-date';
@@ -1786,7 +1786,7 @@ function renderChangelog() {
 function openChangelog() {
     renderChangelog();
     $('changelog-popup').hidden = false;
-    // Mark as read — set lastSeen to the highest version
+    // Mark as read - set lastSeen to the highest version
     const latest = Math.max(...CHANGELOG.map((e) => e.version));
     setLastSeenChangelog(latest);
     updateBellBadge();
@@ -1833,7 +1833,7 @@ async function recoverPendingRecordings() {
             metadata: rec.metadata || {},
             idbId: rec.id,
             status: 'auth_required',  // gets the recovery UI with retry button
-            error: 'Запись осталась с прошлого раза. Войдите если нужно — и нажмите «Попробовать снова».',
+            error: '?????? ???????? ? ???????? ????. ??????? ???? ????? - ? ??????? �??????????? ?????�.',
             progress: 0,
             recovered: true,
         };
