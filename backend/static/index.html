@@ -302,32 +302,7 @@
         .badge-done { color: #10b981; font-weight: 500; }
         .badge-error { color: var(--error); font-weight: 500; }
 
-        /* History */
-        .history-card { padding: 1.25rem 1.5rem 0.5rem; margin-bottom: 1.25rem; }
-        .history-header {
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 1rem;
-        }
-        .history-header h2 { margin: 0; font-size: 1.25rem; font-weight: 600; }
-        .history-badge {
-            background: rgba(255, 255, 255, 0.08);
-            color: var(--muted);
-            padding: 0.2rem 0.6rem;
-            border-radius: 999px;
-            font-size: 0.85rem;
-            font-weight: 600;
-        }
-        .history-list { padding: 0; }
-        .history-item {
-            display: flex; align-items: center; gap: 1rem;
-            padding: 1rem 0; border-top: 1px solid var(--border);
-        }
-        .history-item:first-child { border-top: none; padding-top: 0; }
-        .history-info { flex: 1; min-width: 0; }
-        .history-info strong { display: block; word-break: break-word; font-weight: 500; }
-        .history-info .meta { font-size: 0.85rem; margin: 0.25rem 0 0; }
-        .history-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
-        .history-empty { color: var(--muted); font-size: 0.95rem; padding: 1rem 0; }
+
 
         /* Changelog bell & popup */
         .bell-btn {
@@ -450,14 +425,7 @@
         <div id="changelog-list" class="changelog-list"></div>
     </div>
 
-    <!-- HISTORY -->
-    <div class="card history-card" id="history-card" hidden>
-        <div class="history-header">
-            <h2>Недавние черновики</h2>
-            <span id="history-count" class="history-badge"></span>
-        </div>
-        <div class="history-list" id="history-list"></div>
-    </div>
+
 
     <!-- METADATA (Hidden as requested) -->
     <details class="card meta-card" id="meta-card" style="display: none;">
@@ -663,57 +631,7 @@ function deleteFromHistory(id) {
     saveHistory(loadHistory().filter((h) => h.id !== id));
     renderHistory();
 }
-function renderHistory() {
-    const list = loadHistory();
-    const card = $('history-card');
-    const listEl = $('history-list');
-    const countEl = $('history-count');
-    if (list.length === 0) {
-        card.hidden = true;
-        return;
-    }
-    card.hidden = false;
-    countEl.textContent = list.length;
-    listEl.innerHTML = '';
-    for (const entry of list) {
-        const item = document.createElement('div');
-        item.className = 'history-item';
-        const date = entry.timestamp ? new Date(entry.timestamp) : new Date();
-        const dateStr = date.toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: 'numeric' })
-            + ' ' + date.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
-        const meta = entry.metadata || {};
-        const title = meta.defendant || meta.case_number || entry.filename || 'Без названия';
-        const subtitle = `${dateStr} · ${entry.duration_min ?? '—'} мин`;
-        const info = document.createElement('div');
-        info.className = 'history-info';
-        const strong = document.createElement('strong');
-        strong.textContent = title;
-        const metaP = document.createElement('p');
-        metaP.className = 'meta';
-        metaP.textContent = subtitle;
-        info.appendChild(strong);
-        info.appendChild(metaP);
-        const actions = document.createElement('div');
-        actions.className = 'history-actions';
-        const dlBtn = document.createElement('button');
-        dlBtn.className = 'small';
-        dlBtn.textContent = '⬇';
-        dlBtn.title = 'Скачать .docx';
-        dlBtn.addEventListener('click', () => downloadDocx(entry.draft, makeFilename(entry)));
-        const delBtn = document.createElement('button');
-        delBtn.className = 'secondary small';
-        delBtn.textContent = '✕';
-        delBtn.title = 'Удалить';
-        delBtn.addEventListener('click', () => {
-            if (confirm('Удалить этот черновик из истории?')) deleteFromHistory(entry.id);
-        });
-        actions.appendChild(dlBtn);
-        actions.appendChild(delBtn);
-        item.appendChild(info);
-        item.appendChild(actions);
-        listEl.appendChild(item);
-    }
-}
+function renderHistory() {}
 function makeFilename(entry) {
     const meta = entry.metadata || {};
     const parts = [];
