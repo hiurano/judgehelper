@@ -1030,23 +1030,24 @@ function renderStagedBar() {
     if (!bar) {
         bar = document.createElement('div');
         bar.id = 'staged-bar';
-        bar.style.cssText = 'background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.75rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap';
+        bar.style.cssText = 'padding:1.5rem 0 0; margin-top:1.5rem; border-top:1px solid var(--border); display:flex; align-items:center; gap:1rem; flex-wrap:wrap';
         const list = $('queue-list');
-        list.parentNode.insertBefore(bar, list);
+        list.parentNode.insertBefore(bar, list.nextSibling);
     }
     const staged = queue.filter((q) => q.status === 'staged');
-    if (staged.length < 2) {
+    if (staged.length < 1) {
         bar.style.display = 'none';
         return;
     }
     bar.style.display = 'flex';
     bar.innerHTML = '';
     const label = document.createElement('div');
-    label.style.cssText = 'flex:1;min-width:200px';
-    label.innerHTML = `<strong>${staged.length} записей ждут обработки</strong> — расшифровать все сразу?`;
+    label.style.cssText = 'flex:1;min-width:200px;font-size:1.05rem';
+    label.innerHTML = `Готово к обработке: <strong>${staged.length}</strong>`;
     bar.appendChild(label);
     const goBtn = document.createElement('button');
-    goBtn.textContent = '▶ Расшифровать всё';
+    goBtn.className = 'big';
+    goBtn.textContent = staged.length > 1 ? 'Расшифровать всё' : 'Расшифровать';
     goBtn.addEventListener('click', () => {
         staged.forEach((s) => processQueueItem(s));
     });
@@ -1059,9 +1060,9 @@ function renderMergeBar() {
     if (!bar) {
         bar = document.createElement('div');
         bar.id = 'merge-bar';
-        bar.style.cssText = 'background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.75rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap';
+        bar.style.cssText = 'padding:1.5rem 0 0; margin-top:1.5rem; border-top:1px solid var(--border); display:flex; align-items:center; gap:1rem; flex-wrap:wrap';
         const list = $('queue-list');
-        list.parentNode.insertBefore(bar, list);
+        list.parentNode.insertBefore(bar, list.nextSibling);
     }
     const selected = queue.filter((q) => q.selected && (q.status === 'done' || q.status === 'transcribed'));
     if (selected.length < 2) {
@@ -1165,7 +1166,7 @@ function renderQueueItem(item) {
 
     const name = document.createElement('div');
     name.className = 'queue-name';
-    name.textContent = (item.isSession ? '🔗 ' : '🎵 ') + item.filename;
+    name.textContent = (item.isSession ? 'Часть: ' : '') + item.filename;
     head.appendChild(name);
     if (item.sizeMB && item.sizeMB !== '—') {
         const size = document.createElement('span');
@@ -1198,27 +1199,27 @@ function renderQueueItem(item) {
     } else if (item.status === 'done') {
         const t = document.createElement('span');
         t.className = 'badge-done';
-        t.innerHTML = `✓ Готово · ${item.duration_min ?? '—'} мин · ${(item.draft?.length || 0).toLocaleString('ru')} символов`;
+        t.innerHTML = `Готово · ${item.duration_min ?? '—'} мин · ${(item.draft?.length || 0).toLocaleString('ru')} символов`;
         status.appendChild(t);
     } else if (item.status === 'transcribed') {
         const t = document.createElement('span');
         t.className = 'badge-done';
-        t.textContent = `✓ Расшифровано · ${item.duration_min ?? '—'} мин · готово к объединению`;
+        t.textContent = `Расшифровано · ${item.duration_min ?? '—'} мин · готово к объединению`;
         status.appendChild(t);
     } else if (item.status === 'auth_required') {
         const t = document.createElement('span');
         t.className = 'badge-error';
-        t.textContent = '🔒 Войдите заново';
+        t.textContent = 'Войдите заново';
         status.appendChild(t);
     } else if (item.status === 'error') {
         const t = document.createElement('span');
         t.className = 'badge-error';
-        t.textContent = '⚠ Ошибка';
+        t.textContent = 'Ошибка';
         status.appendChild(t);
     } else if (item.status === 'staged') {
         const t = document.createElement('span');
         t.style.color = 'var(--muted)';
-        t.textContent = '⏸ Готов к обработке';
+        t.textContent = 'Готов к обработке';
         status.appendChild(t);
     } else {
         const t = document.createElement('span');
@@ -1272,29 +1273,9 @@ function renderQueueItem(item) {
     actions.className = 'queue-actions';
 
     if (item.status === 'staged') {
-        const goBtn = document.createElement('button');
-        goBtn.className = 'small';
-        goBtn.textContent = '▶ Расшифровать';
-        goBtn.addEventListener('click', () => {
-            processQueueItem(item);
-        });
-        actions.appendChild(goBtn);
-
-        // Mark-as-part toggle: if user knows this is part of a multi-part
-        // session, they can mark it so it doesn't generate an individual draft.
-        const partBtn = document.createElement('button');
-        partBtn.className = 'secondary small';
-        partBtn.textContent = item.markAsPart ? '🔗 Часть заседания ✓' : '🔗 Часть заседания';
-        partBtn.title = 'Если это часть записи с перерывом — поставьте отметку, и черновик будет генерироваться один раз для всех частей вместе';
-        partBtn.addEventListener('click', () => {
-            item.markAsPart = !item.markAsPart;
-            renderQueue();
-        });
-        actions.appendChild(partBtn);
-
         const removeBtn = document.createElement('button');
         removeBtn.className = 'secondary small';
-        removeBtn.textContent = '✕ Убрать';
+        removeBtn.textContent = '✕';
         removeBtn.addEventListener('click', () => {
             if (item.idbId) deleteRecordingFromIDB(item.idbId).catch(() => {});
             queue = queue.filter((q) => q.key !== item.key);
@@ -1360,7 +1341,7 @@ function renderQueueItem(item) {
     if (item.status === 'error' || item.status === 'auth_required') {
         const rmBtn = document.createElement('button');
         rmBtn.className = 'secondary small';
-        rmBtn.textContent = '✕ Убрать';
+        rmBtn.textContent = '✕';
         rmBtn.addEventListener('click', () => {
             // For auth_required also drop the IDB entry — user is abandoning
             if (item.idbId && item.status !== 'done') {
