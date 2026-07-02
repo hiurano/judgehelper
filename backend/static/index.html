@@ -1044,10 +1044,10 @@ function renderStagedBar() {
     }
     const staged = queue.filter((q) => q.status === 'staged');
     if (staged.length < 2) {
-        bar.hidden = true;
+        bar.style.display = 'none';
         return;
     }
-    bar.hidden = false;
+    bar.style.display = 'flex';
     bar.innerHTML = '';
     const label = document.createElement('div');
     label.style.cssText = 'flex:1;min-width:200px';
@@ -1073,10 +1073,10 @@ function renderMergeBar() {
     }
     const selected = queue.filter((q) => q.selected && (q.status === 'done' || q.status === 'transcribed'));
     if (selected.length < 2) {
-        bar.hidden = true;
+        bar.style.display = 'none';
         return;
     }
-    bar.hidden = false;
+    bar.style.display = 'flex';
     bar.innerHTML = '';
     const label = document.createElement('div');
     label.style.cssText = 'flex:1;min-width:200px';
@@ -1313,14 +1313,6 @@ function renderQueueItem(item) {
     }
 
     if (item.status === 'done') {
-        const expandBtn = document.createElement('button');
-        expandBtn.className = 'small';
-        expandBtn.textContent = item.expanded ? 'Свернуть' : '✏ Открыть и править';
-        expandBtn.addEventListener('click', () => {
-            item.expanded = !item.expanded;
-            renderQueue();
-        });
-        actions.appendChild(expandBtn);
 
         const dlBtn = document.createElement('button');
         dlBtn.className = 'small';
@@ -1336,23 +1328,6 @@ function renderQueueItem(item) {
             }));
         });
         actions.appendChild(dlBtn);
-
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'secondary small';
-        copyBtn.textContent = 'Скопировать';
-        copyBtn.addEventListener('click', async () => {
-            const text = item.expanded
-                ? (document.getElementById('draft-' + item.key)?.value || item.draft)
-                : item.draft;
-            try {
-                await navigator.clipboard.writeText(text);
-                copyBtn.textContent = 'Скопировано ✓';
-                setTimeout(() => { copyBtn.textContent = 'Скопировать'; }, 1500);
-            } catch (e) {
-                alert('Не удалось. Выделите текст вручную.');
-            }
-        });
-        actions.appendChild(copyBtn);
     }
 
     if (item.status === 'auth_required') {
@@ -1390,7 +1365,7 @@ function renderQueueItem(item) {
         actions.appendChild(retryBtn);
     }
 
-    if (item.status === 'error' || item.status === 'done' || item.status === 'auth_required') {
+    if (item.status === 'error' || item.status === 'auth_required') {
         const rmBtn = document.createElement('button');
         rmBtn.className = 'secondary small';
         rmBtn.textContent = '✕ Убрать';
