@@ -114,14 +114,19 @@ TRANSCRIPT_FIXES: list[tuple[str, str, int]] = [
     # Court / geography
     (r"\bНижневатовск(ий|ого|ому|им|ом)?\b",      r"Нижневартовск\1", re.IGNORECASE),
     (r"\bНижневарковск(ий|ого|ому|им|ом)?\b",     r"Нижневартовск\1", re.IGNORECASE),
+    (r"\bНижнего\s+Арктика\b",                     "Нижневартовска",    re.IGNORECASE),
+    (r"\bНижневальтовск(ая|ой|ий|ого|ому|им|ом)\b",r"Нижневартовск\1", re.IGNORECASE),
     (r"\bНижний\s+Артефакт\b",                     "Нижневартовск",     re.IGNORECASE),
     (r"\bНижний\s+Арктический\b",                  "Нижневартовск",     re.IGNORECASE),
     (r"\bКонференцийск(ого|ому|им|ом|ий)\b",       r"Ханты-Мансийск\1",  re.IGNORECASE),
     (r"\bсуд\s+Игорьевича\b",                      "суд Югры",          re.IGNORECASE),
     # Codes
+    (r"\b10-28\b",                                 "228",               re.IGNORECASE),
+    (r"\bкровного\s+кодекса\b",                    "Уголовного кодекса",re.IGNORECASE),
     (r"\bУ\s*КРС\b",                               "УК РФ",             re.IGNORECASE),
     (r"\bУ\s*ПКРС\b",                              "УПК РФ",            re.IGNORECASE),
     # Common mishearings
+    (r"\bнеподмение\b",                            "не позднее",        re.IGNORECASE),
     (r"\bпрещени(я|е|ю|ем|и)\b",                   r"пресечени\1",      re.IGNORECASE),
     (r"\bпрофессиональн(ые|ых|ым|ыми)\s+издержк",   r"процессуальн\1 издержк", re.IGNORECASE),
     # Product names
@@ -682,15 +687,25 @@ async def _submit_to_assemblyai(temp_id: str, audio: bytes, filename: str):
             audio_url = up_resp.json()["upload_url"]
             log.info(f"[{temp_id}] Uploaded to AssemblyAI ({filename})")
 
+            job_meta = jobs.get(temp_id, {}).get("metadata", {})
+            dynamic_boost = list(WORD_BOOST)
+            if job_meta.get("defendant"):
+                defendant_name = job_meta["defendant"]
+                dynamic_boost.append(defendant_name)
+                # Boost surname alone
+                dynamic_boost.append(defendant_name.split()[0])
+            if job_meta.get("judge"):
+                dynamic_boost.append(job_meta["judge"])
+
             body = {
                 "audio_url": audio_url,
                 "language_code": "ru",
                 "speaker_labels": True,
                 "speakers_expected": 3,
-                "speech_models": ["universal-2"],
+                "speech_model": "best",
                 "punctuate": True,
                 "format_text": True,
-                "word_boost": WORD_BOOST,
+                "word_boost": dynamic_boost,
                 "boost_param": "high",
             }
             if BASE_URL and WEBHOOK_SECRET:
