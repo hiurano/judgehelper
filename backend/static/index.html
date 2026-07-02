@@ -21,23 +21,23 @@
 
     <style>
         :root {
-            --bg: #09090b; /* Zinc 950 */
-            --panel: rgba(24, 24, 27, 0.7); /* Zinc 900 with transparency */
-            --panel-border: rgba(63, 63, 70, 0.4);
-            --text: #f4f4f5; /* Zinc 50 */
-            --muted: #a1a1aa; /* Zinc 400 */
-            --accent: #8b5cf6; /* Violet 500 */
-            --accent-hover: #7c3aed; /* Violet 600 */
-            --accent-glow: rgba(139, 92, 246, 0.4);
+            --bg: #212121;
+            --panel: #2f2f2f;
+            --panel-border: transparent;
+            --text: #ececec;
+            --muted: #b4b4b4;
+            --accent: #ffffff;
+            --accent-hover: #e5e5e5;
+            --accent-glow: transparent;
             --error: #ef4444;
             --error-bg: rgba(220, 38, 38, 0.1);
-            --warn-bg: rgba(245, 158, 11, 0.1);
-            --warn-border: rgba(245, 158, 11, 0.3);
-            --border: rgba(255, 255, 255, 0.1);
+            --warn-bg: rgba(255, 255, 255, 0.05);
+            --warn-border: rgba(255, 255, 255, 0.1);
+            --border: rgba(255, 255, 255, 0.15);
             --rec: #ef4444;
-            --rec-glow: rgba(239, 68, 68, 0.4);
-            --done-bg: rgba(16, 185, 129, 0.1);
-            --done-border: rgba(16, 185, 129, 0.3);
+            --rec-glow: transparent;
+            --done-bg: rgba(255, 255, 255, 0.05);
+            --done-border: rgba(255, 255, 255, 0.15);
         }
 
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -48,10 +48,6 @@
             padding-top: max(1.5rem, env(safe-area-inset-top));
             padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
             background: var(--bg);
-            background-image: 
-                radial-gradient(at 0% 0%, rgba(139, 92, 246, 0.15) 0px, transparent 50%),
-                radial-gradient(at 100% 100%, rgba(59, 130, 246, 0.15) 0px, transparent 50%);
-            background-attachment: fixed;
             color: var(--text);
             line-height: 1.5;
             -webkit-text-size-adjust: 100%;
@@ -98,8 +94,8 @@
         }
         #drop-zone.dragover { 
             border-color: var(--accent); 
-            background: rgba(139, 92, 246, 0.1); 
-            box-shadow: 0 0 20px var(--accent-glow);
+            background: rgba(255, 255, 255, 0.1); 
+            box-shadow: none;
         }
         #drop-zone p { margin: 0 0 0.5rem; color: var(--text); font-size: 1.125rem; font-weight: 500; }
         #drop-zone .hint { font-size: 0.9rem; color: var(--muted); }
@@ -107,17 +103,17 @@
 
         /* Buttons */
         button {
-            background: var(--accent); color: white; border: none;
+            background: var(--accent); color: #000; border: none;
             padding: 0.875rem 1.5rem; border-radius: 10px;
             font-size: 1rem; cursor: pointer; font-weight: 600;
             transition: all 0.2s ease;
             min-height: 48px;
-            box-shadow: 0 4px 14px 0 var(--accent-glow);
+            box-shadow: none;
         }
         button:active:not(:disabled) { transform: scale(0.96); }
         button:hover:not(:disabled) { 
             background: var(--accent-hover); 
-            box-shadow: 0 6px 20px 0 var(--accent-glow);
+            box-shadow: none;
         }
         button:disabled { background: rgba(255,255,255,0.1); color: var(--muted); box-shadow: none; cursor: not-allowed; }
         
@@ -134,11 +130,12 @@
         
         button.danger { 
             background: var(--rec); 
-            box-shadow: 0 4px 14px 0 var(--rec-glow);
+            color: #fff;
+            box-shadow: none;
         }
         button.danger:hover:not(:disabled) { 
             background: #dc2626; 
-            box-shadow: 0 6px 20px 0 var(--rec-glow);
+            box-shadow: none;
         }
         
         button.small { padding: 0.5rem 1rem; font-size: 0.875rem; min-height: 36px; border-radius: 8px; }
@@ -661,10 +658,6 @@ function renderHistory() {
         info.appendChild(metaP);
         const actions = document.createElement('div');
         actions.className = 'history-actions';
-        const openBtn = document.createElement('button');
-        openBtn.className = 'secondary small';
-        openBtn.textContent = 'Открыть';
-        openBtn.addEventListener('click', () => openHistoryEntry(entry));
         const dlBtn = document.createElement('button');
         dlBtn.className = 'small';
         dlBtn.textContent = '⬇';
@@ -677,7 +670,6 @@ function renderHistory() {
         delBtn.addEventListener('click', () => {
             if (confirm('Удалить этот черновик из истории?')) deleteFromHistory(entry.id);
         });
-        actions.appendChild(openBtn);
         actions.appendChild(dlBtn);
         actions.appendChild(delBtn);
         item.appendChild(info);
