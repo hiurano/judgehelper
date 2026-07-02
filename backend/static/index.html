@@ -281,6 +281,12 @@
         .queue-actions { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
         .queue-actions button { flex: 0 1 auto; }
         
+        .queue-remove-btn {
+            margin-left: auto; background: transparent; border: none; padding: 0 0.5rem;
+            font-size: 1.25rem; color: var(--muted); min-height: 0; box-shadow: none; cursor: pointer;
+        }
+        .queue-remove-btn:hover { color: var(--text); background: transparent; }
+        
         .queue-error-msg { color: var(--error); font-size: 0.9rem; margin-top: 0.5rem; }
         .badge-done { color: #34d399; font-weight: 500; }
         .badge-error { color: var(--error); font-weight: 500; }
@@ -1174,6 +1180,23 @@ function renderQueueItem(item) {
         size.textContent = item.sizeMB + ' МБ';
         head.appendChild(size);
     }
+    
+    if (item.status === 'staged' || item.status === 'error' || item.status === 'auth_required') {
+        const rmBtn = document.createElement('button');
+        rmBtn.className = 'queue-remove-btn';
+        rmBtn.textContent = '✕';
+        rmBtn.title = 'Удалить';
+        rmBtn.addEventListener('click', () => {
+            if (item.idbId && item.status !== 'done') {
+                deleteRecordingFromIDB(item.idbId).catch(() => {});
+            }
+            queue = queue.filter((q) => q.key !== item.key);
+            if (queue.length === 0) showCard('upload-card');
+            else renderQueue();
+        });
+        head.appendChild(rmBtn);
+    }
+    
     wrap.appendChild(head);
 
     // Status row
@@ -1272,19 +1295,6 @@ function renderQueueItem(item) {
     const actions = document.createElement('div');
     actions.className = 'queue-actions';
 
-    if (item.status === 'staged') {
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'secondary small';
-        removeBtn.textContent = '✕';
-        removeBtn.addEventListener('click', () => {
-            if (item.idbId) deleteRecordingFromIDB(item.idbId).catch(() => {});
-            queue = queue.filter((q) => q.key !== item.key);
-            if (queue.length === 0) showCard('upload-card');
-            else renderQueue();
-        });
-        actions.appendChild(removeBtn);
-    }
-
     if (item.status === 'done') {
 
         const dlBtn = document.createElement('button');
@@ -1336,25 +1346,6 @@ function renderQueueItem(item) {
             processQueueItem(item);
         });
         actions.appendChild(retryBtn);
-    }
-
-    if (item.status === 'error' || item.status === 'auth_required') {
-        const rmBtn = document.createElement('button');
-        rmBtn.className = 'secondary small';
-        rmBtn.textContent = '✕';
-        rmBtn.addEventListener('click', () => {
-            // For auth_required also drop the IDB entry — user is abandoning
-            if (item.idbId && item.status !== 'done') {
-                deleteRecordingFromIDB(item.idbId).catch(() => {});
-            }
-            queue = queue.filter((q) => q.key !== item.key);
-            if (queue.length === 0) {
-                showCard('upload-card');
-            } else {
-                renderQueue();
-            }
-        });
-        actions.appendChild(rmBtn);
     }
 
     if (actions.children.length) wrap.appendChild(actions);
