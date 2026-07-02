@@ -241,19 +241,19 @@
         .divider::after { right: 0; }
 
         /* Metadata card */
-        details.meta-card, details.history-card { padding: 0; margin-bottom: 1.25rem; }
-        details.meta-card > summary, details.history-card > summary {
+        details.meta-card { padding: 0; margin-bottom: 1.25rem; }
+        details.meta-card > summary {
             list-style: none; cursor: pointer; padding: 1.25rem 1.5rem;
             font-weight: 600; user-select: none;
             display: flex; align-items: center; gap: 0.75rem;
             min-height: 56px;
         }
-        details > summary::-webkit-details-marker { display: none; }
-        details > summary::after {
+        details.meta-card > summary::-webkit-details-marker { display: none; }
+        details.meta-card > summary::after {
             content: '▼'; margin-left: auto; font-size: 0.75rem;
             color: var(--muted); transition: transform 0.2s;
         }
-        details[open] > summary::after { transform: rotate(180deg); }
+        details.meta-card[open] > summary::after { transform: rotate(180deg); }
         
         .meta-fields { padding: 0 1.5rem 1.5rem; display: grid; gap: 1rem; }
         .meta-fields label { font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 0.375rem; font-weight: 500; }
@@ -271,7 +271,7 @@
         .queue-item {
             background: rgba(255,255,255,0.02);
             border: 1px solid var(--border); border-radius: 12px;
-            padding: 1.25rem; margin-bottom: 1rem;
+            padding: 1rem; margin-bottom: 0.75rem;
             transition: all 0.3s ease;
         }
         .queue-item.done { background: var(--done-bg); border-color: var(--done-border); }
@@ -279,14 +279,14 @@
         
         .queue-item-head {
             display: flex; gap: 0.75rem; align-items: center;
-            margin-bottom: 0.75rem;
+            margin-bottom: 0.5rem;
         }
-        .queue-name { font-weight: 600; word-break: break-word; font-size: 1.05rem; }
-        .queue-size { color: var(--muted); font-size: 0.85rem; flex-shrink: 0; }
+        .queue-name { font-weight: 600; word-break: break-word; font-size: 1rem; }
+        .queue-size { color: var(--muted); font-size: 0.8rem; flex-shrink: 0; }
         
         .queue-status {
             display: flex; align-items: center; gap: 0.75rem;
-            font-size: 0.95rem; margin: 0.75rem 0 0.5rem; color: var(--muted);
+            font-size: 0.9rem; margin: 0.5rem 0 0; color: var(--muted);
         }
         .queue-progress { margin: 0.75rem 0; }
         .queue-actions { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
@@ -303,7 +303,21 @@
         .badge-error { color: var(--error); font-weight: 500; }
 
         /* History */
-        .history-list { padding: 0 1.5rem 1.5rem; }
+        .history-card { padding: 1.25rem 1.5rem 0.5rem; margin-bottom: 1.25rem; }
+        .history-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+        .history-header h2 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+        .history-badge {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--muted);
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .history-list { padding: 0; }
         .history-item {
             display: flex; align-items: center; gap: 1rem;
             padding: 1rem 0; border-top: 1px solid var(--border);
@@ -437,10 +451,13 @@
     </div>
 
     <!-- HISTORY -->
-    <details class="card history-card" id="history-card" hidden>
-        <summary>Недавние черновики <span id="history-count" class="meta" style="margin:0;margin-left:0.5rem;color:var(--accent);"></span></summary>
+    <div class="card history-card" id="history-card" hidden>
+        <div class="history-header">
+            <h2>Недавние черновики</h2>
+            <span id="history-count" class="history-badge"></span>
+        </div>
         <div class="history-list" id="history-list"></div>
-    </details>
+    </div>
 
     <!-- METADATA (Hidden as requested) -->
     <details class="card meta-card" id="meta-card" style="display: none;">
@@ -656,7 +673,7 @@ function renderHistory() {
         return;
     }
     card.hidden = false;
-    countEl.textContent = `(${list.length})`;
+    countEl.textContent = list.length;
     listEl.innerHTML = '';
     for (const entry of list) {
         const item = document.createElement('div');

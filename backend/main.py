@@ -1021,6 +1021,9 @@ def render_docx(text: str) -> bytes:
     for line in text.split("\n"):
         compact = re.sub(r" {5,}", "\t", line)
         p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        p.paragraph_format.line_spacing = 1.15
         run = p.add_run(compact)
         # Explicit per-run font set too — belt and suspenders for Cyrillic
         run.font.name = "Times New Roman"
@@ -1067,10 +1070,12 @@ async def render_docx_endpoint(payload: dict):
     filename = payload.get("filename") or "protokol.docx"
     if not filename.endswith(".docx"):
         filename = f"{filename}.docx"
+    import urllib.parse
+    quoted_filename = urllib.parse.quote(filename)
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f"attachment; filename*=utf-8''{quoted_filename}"},
     )
 
 
