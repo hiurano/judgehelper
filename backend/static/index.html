@@ -30,14 +30,15 @@
             --accent-hover: #e5e5e5;
             --accent-glow: transparent;
             --error: #ef4444;
-            --error-bg: rgba(220, 38, 38, 0.1);
+            --error-bg: rgba(239, 68, 68, 0.05);
+            --error-border: rgba(239, 68, 68, 0.2);
             --warn-bg: rgba(255, 255, 255, 0.05);
             --warn-border: rgba(255, 255, 255, 0.1);
             --border: rgba(255, 255, 255, 0.15);
             --rec: #ef4444;
             --rec-glow: transparent;
-            --done-bg: rgba(255, 255, 255, 0.05);
-            --done-border: rgba(255, 255, 255, 0.15);
+            --done-bg: rgba(16, 185, 129, 0.05);
+            --done-border: rgba(16, 185, 129, 0.2);
         }
 
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -100,6 +101,16 @@
         #drop-zone p { margin: 0 0 0.5rem; color: var(--text); font-size: 1.125rem; font-weight: 500; }
         #drop-zone .hint { font-size: 0.9rem; color: var(--muted); }
         #file-input { display: none; }
+        
+        #global-dropzone {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(33, 33, 33, 0.9); z-index: 9999;
+            display: flex; align-items: center; justify-content: center;
+            border: 4px dashed rgba(255, 255, 255, 0.3); border-radius: 16px;
+            opacity: 0; pointer-events: none; transition: opacity 0.2s;
+        }
+        #global-dropzone.active { opacity: 1; pointer-events: all; }
+        #global-dropzone h2 { color: var(--text); font-size: 2rem; pointer-events: none; }
 
         /* Buttons */
         button {
@@ -170,19 +181,19 @@
             font-size: 0.9rem; margin: 1rem 0; text-align: center; color: #fcd34d;
         }
 
-        progress { 
-            width: 100%; height: 6px; border-radius: 3px; overflow: hidden; 
-            background: rgba(255,255,255,0.1);
-            border: none;
+        .custom-progress {
+            width: 100%; height: 2px; background: rgba(255,255,255,0.1);
+            border-radius: 2px; overflow: hidden; margin: 0.75rem 0;
         }
-        progress::-webkit-progress-bar { background: rgba(255,255,255,0.1); }
-        progress::-webkit-progress-value { 
-            background: linear-gradient(90deg, var(--accent), #3b82f6); 
-            border-radius: 3px;
+        .custom-progress-bar {
+            height: 100%; background: var(--text); transition: width 0.3s ease;
         }
-        progress::-moz-progress-bar { 
-            background: linear-gradient(90deg, var(--accent), #3b82f6); 
-            border-radius: 3px;
+        .custom-progress-bar.indeterminate {
+            width: 30%; animation: indeterminate-slide 1.5s infinite linear;
+        }
+        @keyframes indeterminate-slide {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(333%); }
         }
 
         textarea {
@@ -264,7 +275,7 @@
             transition: all 0.3s ease;
         }
         .queue-item.done { background: var(--done-bg); border-color: var(--done-border); }
-        .queue-item.error { background: var(--error-bg); border-color: rgba(239, 68, 68, 0.3); }
+        .queue-item.error { background: var(--error-bg); border-color: var(--error-border); }
         
         .queue-item-head {
             display: flex; gap: 0.75rem; align-items: baseline;
@@ -288,7 +299,7 @@
         .queue-remove-btn:hover { color: var(--text); background: transparent; }
         
         .queue-error-msg { color: var(--error); font-size: 0.9rem; margin-top: 0.5rem; }
-        .badge-done { color: #34d399; font-weight: 500; }
+        .badge-done { color: #10b981; font-weight: 500; }
         .badge-error { color: var(--error); font-weight: 500; }
 
         /* History */
@@ -399,6 +410,9 @@
     </style>
 </head>
 <body>
+<div id="global-dropzone">
+    <h2>Бросайте файлы куда угодно</h2>
+</div>
 <div class="container">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;margin-bottom:2rem">
         <div style="min-width:0;flex:1">
@@ -1253,27 +1267,31 @@ function renderQueueItem(item) {
 
     // Progress bar during upload
     if (item.status === 'uploading') {
-        const pr = document.createElement('progress');
-        pr.className = 'queue-progress';
-        pr.max = 100;
+        const prWrap = document.createElement('div');
+        prWrap.className = 'custom-progress';
+        const prBar = document.createElement('div');
+        prBar.className = 'custom-progress-bar';
         if (item.uploadDone) {
-            pr.removeAttribute('value');
+            prBar.classList.add('indeterminate');
         } else {
-            pr.value = item.progress || 0;
+            prBar.style.width = (item.progress || 0) + '%';
         }
-        wrap.appendChild(pr);
+        prWrap.appendChild(prBar);
+        wrap.appendChild(prWrap);
     } else if (item.status === 'processing') {
-        const pr = document.createElement('progress');
-        pr.className = 'queue-progress';
-        // Determinate bar only when we have an estimate (transcribing phase
-        // with audio_duration_sec known). Otherwise indeterminate, matching
-        // previous behaviour. Drafting phase is short + variable, no estimate.
+        const prWrap = document.createElement('div');
+        prWrap.className = 'custom-progress';
+        const prBar = document.createElement('div');
+        prBar.className = 'custom-progress-bar';
+        
         const est = item.phase === 'transcribing' ? estimateTranscribing(item) : null;
         if (est) {
-            pr.max = 100;
-            pr.value = est.pct;
+            prBar.style.width = est.pct + '%';
+        } else {
+            prBar.classList.add('indeterminate');
         }
-        wrap.appendChild(pr);
+        prWrap.appendChild(prBar);
+        wrap.appendChild(prWrap);
     }
 
     if ((item.status === 'error' || item.status === 'auth_required') && item.error) {
@@ -1402,14 +1420,22 @@ dropZone.addEventListener('click', () => fileInput.click());
 $('pick-btn').addEventListener('click', () => fileInput.click());
 $('add-more-btn').addEventListener('click', () => fileInput.click());
 
-dropZone.addEventListener('dragover', (e) => {
+let dragCounter = 0;
+document.addEventListener('dragenter', (e) => {
     e.preventDefault();
-    dropZone.classList.add('dragover');
+    dragCounter++;
+    $('global-dropzone').classList.add('active');
 });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop', (e) => {
+document.addEventListener('dragleave', (e) => {
     e.preventDefault();
-    dropZone.classList.remove('dragover');
+    dragCounter--;
+    if (dragCounter === 0) $('global-dropzone').classList.remove('active');
+});
+document.addEventListener('dragover', (e) => { e.preventDefault(); });
+document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    $('global-dropzone').classList.remove('active');
     if (e.dataTransfer.files.length) addFilesToQueue(e.dataTransfer.files);
 });
 fileInput.addEventListener('change', (e) => {
