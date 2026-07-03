@@ -60,7 +60,7 @@ OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BASE_URL       = os.environ.get("BASE_URL", "").rstrip("/")
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
-MODEL          = os.environ.get("LLM_MODEL", "google/gemini-1.5-flash")
+MODEL          = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
 AUTH_USERNAME  = os.environ.get("AUTH_USERNAME", "")
 AUTH_PASSWORD  = os.environ.get("AUTH_PASSWORD", "")
 

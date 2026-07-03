@@ -22,7 +22,7 @@ services:
       - key: ALLOWED_ORIGINS
         value: "*"
       - key: LLM_MODEL
-        value: google/gemini-1.5-flash
+        value: openai/gpt-4o-mini
       - key: AUTH_USERNAME
         sync: false
       - key: AUTH_PASSWORD
