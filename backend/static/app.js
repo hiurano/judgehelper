@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const BACKEND = window.location.origin;
 const HISTORY_KEY = 'judge-helper:history-v1';
@@ -657,28 +657,6 @@ function renderQueueItem(item) {
             }));
         });
         head.appendChild(dlBtn);
-        
-        const rawBtn = document.createElement('button');
-        rawBtn.className = 'small';
-        rawBtn.textContent = 'Сырой текст';
-        rawBtn.style.cssText = 'margin-left: 8px; background: #64748b;';
-        rawBtn.title = 'Скачать сырую транскрибацию (до обработки нейросетью)';
-        rawBtn.addEventListener('click', () => {
-            const blob = new Blob([item.transcript || "Нет данных"], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'сырой_текст_' + makeFilename({
-                metadata: item.metadata,
-                timestamp: item.timestamp,
-                filename: item.filename,
-            }).replace(/\.docx$/, '.txt');
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        });
-        head.appendChild(rawBtn);
     }
     
     wrap.appendChild(head);
