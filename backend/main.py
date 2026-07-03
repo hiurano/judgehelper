@@ -335,7 +335,7 @@ LOGIN_HTML = """<!DOCTYPE html>
             width: 100%; min-height: 48px;
             background: #ffffff; color: #212121; border: none;
             border-radius: 8px; padding: 0.875rem 1.25rem;
-            font-size: 1rem; font-weight: 600; cursor: pointer;
+            font-size: 1rem; font-family: inherit; font-weight: 600; cursor: pointer;
             margin-top: 0.5rem;
             transition: background-color 0.15s, transform 0.05s;
         }
