@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const BACKEND = window.location.origin;
 const HISTORY_KEY = 'judge-helper:history-v1';
@@ -156,6 +156,7 @@ function openHistoryEntry(entry) {
         metadata: entry.metadata || {},
         status: 'done',
         draft: entry.draft,
+        transcript: entry.transcript,
         duration_min: entry.duration_min,
         model: entry.model,
         jobId: entry.id,
@@ -302,6 +303,7 @@ function pollQueueItem(item) {
                 clearInterval(item.pollTimer);
                 item.status = 'done';
                 item.draft = data.draft;
+                item.transcript = data.transcript;
                 item.duration_min = data.duration_min;
                 item.model = data.model;
                 item.timestamp = new Date().toISOString();
@@ -312,6 +314,7 @@ function pollQueueItem(item) {
                     filename: item.filename,
                     metadata: item.metadata,
                     draft: item.draft,
+                    transcript: item.transcript,
                     model: item.model,
                 });
                 // Upload succeeded — safe to drop the IDB backup
@@ -642,10 +645,24 @@ function renderQueueItem(item) {
     }
     
     if (item.status === 'done') {
+        const btns = document.createElement('div');
+        btns.style.cssText = 'margin-left: auto; display: flex; gap: 0.5rem;';
+        
+        const txtBtn = document.createElement('button');
+        txtBtn.className = 'small secondary';
+        txtBtn.textContent = 'Сырой текст (.txt)';
+        txtBtn.addEventListener('click', () => {
+            downloadTxt(item.transcript, makeFilename({
+                metadata: item.metadata,
+                timestamp: item.timestamp,
+                filename: item.filename,
+            }));
+        });
+        btns.appendChild(txtBtn);
+
         const dlBtn = document.createElement('button');
         dlBtn.className = 'small';
-        dlBtn.textContent = 'Скачать .docx';
-        dlBtn.style.cssText = 'margin-left: auto;';
+        dlBtn.textContent = 'Готовый .docx';
         dlBtn.addEventListener('click', async () => {
             const text = item.expanded
                 ? (document.getElementById('draft-' + item.key)?.value || item.draft)
@@ -656,7 +673,9 @@ function renderQueueItem(item) {
                 filename: item.filename,
             }));
         });
-        head.appendChild(dlBtn);
+        btns.appendChild(dlBtn);
+        
+        head.appendChild(btns);
     }
     
     wrap.appendChild(head);
@@ -1039,6 +1058,20 @@ async function downloadDocx(text, filename) {
         a.click();
         URL.revokeObjectURL(url);
     }
+}
+
+function downloadTxt(text, filename) {
+    if (!text || !text.trim()) return;
+    const txtName = filename.replace(/\.docx$/, '.txt');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = txtName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
 }
 
 // =========================================================================
