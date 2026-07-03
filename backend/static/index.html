@@ -683,31 +683,11 @@ function openHistoryEntry(entry) {
 let queue = [];
 
 function getMetadataFromForm() {
-    return {
-        case_number: ($('meta-case')?.value || '').trim(),
-        defendant:   ($('meta-defendant')?.value || '').trim(),
-        statute:     ($('meta-statute')?.value || '').trim(),
-        judge:       ($('meta-judge')?.value || '').trim(),
-    };
+    return {};
 }
 
-// Persist metadata fields locally so mom doesn't re-enter on every refresh
-function saveMetadataDraft() {
-    try {
-        localStorage.setItem(METADATA_KEY, JSON.stringify(getMetadataFromForm()));
-    } catch {}
-}
-function restoreMetadataDraft() {
-    try {
-        const raw = localStorage.getItem(METADATA_KEY);
-        if (!raw) return;
-        const m = JSON.parse(raw);
-        if (m.case_number) $('meta-case').value = m.case_number;
-        if (m.defendant)   $('meta-defendant').value = m.defendant;
-        if (m.statute)     $('meta-statute').value = m.statute;
-        if (m.judge)       $('meta-judge').value = m.judge;
-    } catch {}
-}
+function saveMetadataDraft() {}
+function restoreMetadataDraft() {}
 ['meta-case', 'meta-defendant', 'meta-statute', 'meta-judge'].forEach((id) => {
     const el = $(id);
     if (el) el.addEventListener('input', saveMetadataDraft);
