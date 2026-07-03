@@ -77,14 +77,10 @@ LLM_FALLBACK_CHAIN = [m for m in LLM_FALLBACK_CHAIN if not (m in _seen or _seen.
 
 BACKEND_DIR = Path(__file__).parent
 PROJECT_DIR = BACKEND_DIR.parent
+BACKEND_DIR = Path(__file__).parent
+PROJECT_DIR = BACKEND_DIR.parent
 SYSTEM_PROMPT_PATH = PROJECT_DIR / "prompts" / "system-protocol.md"
 STATIC_DIR = BACKEND_DIR / "static"
-
-RAW_TRANSCRIPTS_DIR = PROJECT_DIR / "raw_transcripts"
-RAW_TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-
-GENERATED_PROTOCOLS_DIR = PROJECT_DIR / "generated_protocols"
-GENERATED_PROTOCOLS_DIR.mkdir(parents=True, exist_ok=True)
 
 for name, val in [
     ("ASSEMBLYAI_API_KEY", ASSEMBLYAI_KEY),
@@ -919,13 +915,6 @@ async def process_transcript(transcript_id: str):
                 # Pre-LLM deterministic regex cleanup of common AssemblyAI mistakes
                 formatted = clean_transcript(formatted)
 
-                try:
-                    raw_path = RAW_TRANSCRIPTS_DIR / f"{transcript_id}.txt"
-                    raw_path.write_text(formatted, encoding="utf-8")
-                    log.info(f"Saved raw transcript to {raw_path}")
-                except Exception as e:
-                    log.warning(f"Could not save raw transcript: {e}")
-
                 duration_min = round((audio_duration_sec or 0) / 60, 1)
 
                 # PART of a multi-part session — store transcript and STOP.
@@ -979,14 +968,6 @@ async def process_transcript(transcript_id: str):
                     f"[{transcript_id}] Draft via {used_model} ({len(draft)} chars, "
                     f"in={usage.get('prompt_tokens')} out={usage.get('completion_tokens')})"
                 )
-
-                try:
-                    docx_bytes = render_docx(draft)
-                    docx_path = GENERATED_PROTOCOLS_DIR / f"{transcript_id}.docx"
-                    docx_path.write_bytes(docx_bytes)
-                    log.info(f"Saved generated protocol to {docx_path}")
-                except Exception as e:
-                    log.warning(f"Could not save generated protocol: {e}")
 
             jobs[transcript_id] = {
                 "status": "done",
