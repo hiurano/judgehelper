@@ -1,0 +1,11 @@
+.git
+.venv
+.vscode
+.claude
+__pycache__
+*.pyc
+scratch
+done-transcribe
+references1
+references2
+references3
