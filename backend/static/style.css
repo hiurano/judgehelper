@@ -1,3 +1,5 @@
+[hidden] { display: none !important; }
+
 :root {
     --bg: #212121;
     --panel: #2f2f2f;
