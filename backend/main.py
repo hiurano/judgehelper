@@ -1053,6 +1053,10 @@ def render_docx(text: str) -> bytes:
     for line in lines:
         stripped = line.strip()
 
+        # Skip markdown code fences if LLM wrapped output
+        if stripped.startswith("```"):
+            continue
+
         # Fix collapsed signatures like "ПредседательствующийВ.А. Пономарёв" or "Председательствующий В.А. Пономарёв"
         sig_match = re.match(r"^(Председательствующий|Секретарь)(?:\s+|(?=[А-ЯЁ]))(.+)$", stripped)
         if sig_match:
