@@ -105,13 +105,14 @@ function addFilesToQueue(files) {
             filename: f.name,
             sizeMB: (f.size / 1024 / 1024).toFixed(1),
             metadata: fileMeta,
-            status: 'staged',
+            status: 'queued',
             progress: 0,
         };
         queue.push(item);
     }
     showCard('queue-card');
     renderQueue();
+    checkQueueScheduler();
 }
 
 function checkQueueScheduler() {
