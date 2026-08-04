@@ -66,16 +66,15 @@ AUTH_PASSWORD  = os.environ.get("AUTH_PASSWORD", "")
 
 # Models tried in order; first success wins.
 LLM_FALLBACK_CHAIN: list[str] = [
-    "deepseek/deepseek-v4-flash",
     MODEL,
+    "deepseek/deepseek-v4-flash",
+    "deepseek/deepseek-chat",
     "openai/gpt-4o-mini",
 ]
 # dedupe while preserving order
 _seen = set()
 LLM_FALLBACK_CHAIN = [m for m in LLM_FALLBACK_CHAIN if not (m in _seen or _seen.add(m))]
 
-BACKEND_DIR = Path(__file__).parent
-PROJECT_DIR = BACKEND_DIR.parent
 BACKEND_DIR = Path(__file__).parent
 PROJECT_DIR = BACKEND_DIR.parent
 SYSTEM_PROMPT_PATH = PROJECT_DIR / "prompts" / "system-protocol.md"

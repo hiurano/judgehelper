@@ -157,26 +157,37 @@ async function processQueueItem(item) {
 function pollQueueItem(item) {
     if (item.pollTimer) clearInterval(item.pollTimer);
     let failures = 0;
-    const MAX_FAILURES = 5;
-    item.pollTimer = setInterval(async () => {
+    const MAX_FAILURES = 30; // 30 * 5s = 2.5 minutes grace period for cold-starts/network blips
+
+    const checkStatus = async () => {
+        if (item.status === 'done' || item.status === 'error' || item.status === 'transcribed' || item.status === 'auth_required') {
+            if (item.pollTimer) clearInterval(item.pollTimer);
+            return;
+        }
         try {
             const resp = await fetch(`${BACKEND}/status/${item.jobId}`);
             if (!resp.ok) {
                 failures++;
                 if (failures >= MAX_FAILURES) {
-                    clearInterval(item.pollTimer);
+                    if (item.pollTimer) clearInterval(item.pollTimer);
                     item.status = 'error';
-                    item.error = `Сервер не отвечает (HTTP ${resp.status})`;
+                    item.error = `Сервер временно недоступен (HTTP ${resp.status}). Нажмите кнопку ниже для повторной проверки.`;
                     renderQueue();
                     checkQueueScheduler();
                     releaseWakeLockIfDone();
+                } else if (failures > 2) {
+                    item.reconnecting = true;
+                    renderQueue();
                 }
                 return;
             }
             failures = 0;
+            if (item.reconnecting) {
+                item.reconnecting = false;
+            }
             const data = await resp.json();
             if (data.status === 'done') {
-                clearInterval(item.pollTimer);
+                if (item.pollTimer) clearInterval(item.pollTimer);
                 item.status = 'done';
                 item.draft = data.draft;
                 item.transcript = data.transcript;
@@ -187,7 +198,7 @@ function pollQueueItem(item) {
                 checkQueueScheduler();
                 releaseWakeLockIfDone();
             } else if (data.status === 'transcribed') {
-                clearInterval(item.pollTimer);
+                if (item.pollTimer) clearInterval(item.pollTimer);
                 item.status = 'transcribed';
                 item.transcript = data.transcript;
                 item.duration_min = data.duration_min;
@@ -195,9 +206,9 @@ function pollQueueItem(item) {
                 checkQueueScheduler();
                 releaseWakeLockIfDone();
             } else if (data.status === 'error') {
-                clearInterval(item.pollTimer);
+                if (item.pollTimer) clearInterval(item.pollTimer);
                 item.status = 'error';
-                item.error = data.error || 'Неизвестная ошибка';
+                item.error = data.error || 'Неизвестная ошибка обработки';
                 renderQueue();
                 checkQueueScheduler();
                 releaseWakeLockIfDone();
@@ -206,21 +217,27 @@ function pollQueueItem(item) {
                 if (data.created_at)          item.created_at = data.created_at;
                 if (data.aai_started_at)      item.aai_started_at = data.aai_started_at;
                 if (data.drafting_started_at) item.drafting_started_at = data.drafting_started_at;
-                if (data.audio_duration_sec) item.audio_duration_sec = data.audio_duration_sec;
+                if (data.audio_duration_sec)  item.audio_duration_sec = data.audio_duration_sec;
                 renderQueue();
             }
         } catch (err) {
             failures++;
             if (failures >= MAX_FAILURES) {
-                clearInterval(item.pollTimer);
+                if (item.pollTimer) clearInterval(item.pollTimer);
                 item.status = 'error';
-                item.error = 'Не удалось получить статус.';
+                item.error = 'Связь с сервером прервана. Нажмите «Проверить статус снова», когда интернет восстановится.';
                 renderQueue();
                 checkQueueScheduler();
                 releaseWakeLockIfDone();
+            } else if (failures > 2) {
+                item.reconnecting = true;
+                renderQueue();
             }
         }
-    }, 5000);
+    };
+
+    item.forceCheck = checkStatus;
+    item.pollTimer = setInterval(checkStatus, 5000);
 }
 
 function uploadFile(item) {
@@ -282,19 +299,39 @@ function uploadFile(item) {
 // =========================================================================
 function phaseLabel(phase) {
     return {
-        'uploading_to_aai': 'Передача файла на расшифровку…',
+        'uploading_to_aai': 'Передача файла на сервер…',
         'transcribing':     'Расшифровка аудио…',
-        'drafting':         'Составление черновика протокола…',
+        'drafting':         'Составление протокола нейросетью…',
     }[phase] || 'Обработка…';
 }
 
 function estimateTranscribing(item) {
-    if (!item.aai_started_at || !item.audio_duration_sec) return null;
     const nowSec = Date.now() / 1000;
-    const elapsedSec = Math.max(0, Math.round(nowSec - item.aai_started_at));
-    const estimatedSec = Math.max(60, Math.min(600, Math.round(item.audio_duration_sec * 0.3)));
-    const pct = Math.min(98, (elapsedSec / estimatedSec) * 100);
-    return { elapsedSec, estimatedSec, pct };
+    const startSec = item.aai_started_at || item.created_at || (item.pollStart ? item.pollStart / 1000 : nowSec);
+    const elapsedSec = Math.max(0, Math.round(nowSec - startSec));
+
+    // Determine audio length (from AAI or approximate ~2 min per MB for m4a/mp3)
+    let audioSec = item.audio_duration_sec;
+    if (!audioSec && item.sizeMB && item.sizeMB !== '—') {
+        const mb = parseFloat(item.sizeMB);
+        if (!isNaN(mb) && mb > 0) {
+            audioSec = mb * 120;
+        }
+    }
+
+    // AssemblyAI Universal-2 takes ~20-25% of audio duration (no artificial 600s ceiling)
+    const estimatedSec = audioSec ? Math.max(30, Math.round(audioSec * 0.25)) : 180;
+
+    let pct = 0;
+    if (elapsedSec <= estimatedSec) {
+        pct = Math.max(5, Math.round((elapsedSec / estimatedSec) * 90));
+    } else {
+        // Smooth asymptotic progress above 90% towards 99%
+        const overtime = elapsedSec - estimatedSec;
+        const extra = 9 * (1 - Math.exp(-overtime / (estimatedSec * 0.5 || 60)));
+        pct = Math.min(99, Math.round(90 + extra));
+    }
+    return { elapsedSec, estimatedSec, pct, isOvertime: elapsedSec > estimatedSec };
 }
 
 function phaseElapsedSec(item) {
@@ -524,11 +561,28 @@ function renderQueueItem(item) {
         const sp = document.createElement('div'); sp.className = 'spinner'; status.appendChild(sp);
         const t = document.createElement('span');
         const elapsed = phaseElapsedSec(item);
-        const est = item.phase === 'transcribing' ? estimateTranscribing(item) : null;
-        let suffix = elapsed ? ` (${formatHMS(elapsed)}` : '';
-        if (est) suffix += ` из ≈${formatHMS(est.estimatedSec)}`;
-        suffix += elapsed ? ')' : '';
-        t.textContent = phaseLabel(item.phase) + suffix;
+        
+        if (item.reconnecting) {
+            t.style.color = '#f59e0b';
+            t.textContent = `Связь с сервером восстанавливается… (${formatHMS(elapsed)})`;
+        } else if (item.phase === 'uploading_to_aai') {
+            t.textContent = `Передача на сервер расшифровки… (${formatHMS(elapsed)})`;
+        } else if (item.phase === 'transcribing') {
+            const est = estimateTranscribing(item);
+            if (est) {
+                if (est.isOvertime) {
+                    t.textContent = `Расшифровка аудио: ${est.pct}% · ${formatHMS(est.elapsedSec)} (завершение…)`;
+                } else {
+                    t.textContent = `Расшифровка аудио: ${est.pct}% · ${formatHMS(est.elapsedSec)} из ≈${formatHMS(est.estimatedSec)}`;
+                }
+            } else {
+                t.textContent = `Расшифровка аудио… (${formatHMS(elapsed)})`;
+            }
+        } else if (item.phase === 'drafting') {
+            t.textContent = `Составление протокола нейросетью… (${formatHMS(elapsed)})`;
+        } else {
+            t.textContent = phaseLabel(item.phase) + (elapsed ? ` (${formatHMS(elapsed)})` : '');
+        }
         status.appendChild(t);
     } else if (item.status === 'done') {
         const t = document.createElement('span');
@@ -580,9 +634,13 @@ function renderQueueItem(item) {
         prWrap.className = 'custom-progress';
         const prBar = document.createElement('div');
         prBar.className = 'custom-progress-bar';
-        const est = item.phase === 'transcribing' ? estimateTranscribing(item) : null;
-        if (est) {
-            prBar.style.width = est.pct + '%';
+        if (item.phase === 'transcribing') {
+            const est = estimateTranscribing(item);
+            if (est) {
+                prBar.style.width = est.pct + '%';
+            } else {
+                prBar.classList.add('indeterminate');
+            }
         } else {
             prBar.classList.add('indeterminate');
         }
@@ -620,6 +678,21 @@ function renderQueueItem(item) {
             checkQueueScheduler();
         });
         actions.appendChild(retryBtn);
+    } else if (item.status === 'error' && item.jobId) {
+        const checkBtn = document.createElement('button');
+        checkBtn.className = 'secondary small';
+        checkBtn.textContent = '↻ Проверить статус снова';
+        checkBtn.addEventListener('click', () => {
+            item.status = 'processing';
+            item.error = null;
+            item.reconnecting = false;
+            renderQueue();
+            pollQueueItem(item);
+            if (typeof item.forceCheck === 'function') {
+                item.forceCheck();
+            }
+        });
+        actions.appendChild(checkBtn);
     }
 
     if (actions.children.length) wrap.appendChild(actions);
@@ -758,3 +831,23 @@ if ('serviceWorker' in navigator) {
         }
     });
 }
+
+// Re-check jobs immediately on tab activation / unlock / online
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        acquireWakeLock();
+        queue.forEach((item) => {
+            if (item.status === 'processing' && typeof item.forceCheck === 'function') {
+                item.forceCheck();
+            }
+        });
+    }
+});
+
+window.addEventListener('online', () => {
+    queue.forEach((item) => {
+        if (item.status === 'processing' && typeof item.forceCheck === 'function') {
+            item.forceCheck();
+        }
+    });
+});
