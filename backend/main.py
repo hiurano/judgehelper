@@ -127,6 +127,8 @@ TRANSCRIPT_FIXES: list[tuple[str, str, int]] = [
     (r"\bУ\s*КРС\b",                               "УК РФ",             re.IGNORECASE),
     (r"\bУ\s*ПКРС\b",                              "УПК РФ",            re.IGNORECASE),
     # Common mishearings
+    (r"\bнекий\s+форум\b",                          "Козлов",           re.IGNORECASE),
+    (r"\bгосударства\s+НКВД\b",                     "государственного обвинителя", re.IGNORECASE),
     (r"\bнеподмение\b",                            "не позднее",        re.IGNORECASE),
     (r"\bпрещени(я|е|ю|ем|и)\b",                   r"пресечени\1",      re.IGNORECASE),
     (r"\bпрофессиональн(ые|ых|ым|ыми)\s+издержк",   r"процессуальн\1 издержк", re.IGNORECASE),
