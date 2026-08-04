@@ -119,18 +119,25 @@ button.big {
 
 /* Progress bar */
 .custom-progress {
-    width: 100%; height: 2px; background: rgba(255,255,255,0.1);
-    border-radius: 2px; overflow: hidden; margin: 0.75rem 0;
+    width: 100%; height: 6px; background: rgba(255,255,255,0.08);
+    border-radius: 6px; overflow: hidden; margin: 0.85rem 0 0.5rem;
+    position: relative;
 }
 .custom-progress-bar {
-    height: 100%; background: var(--text); transition: width 0.3s ease;
+    height: 100%; 
+    background: linear-gradient(90deg, #38bdf8, #818cf8); 
+    border-radius: 6px;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
 }
 .custom-progress-bar.indeterminate {
-    width: 30%; animation: indeterminate-slide 1.5s infinite linear;
+    width: 35%; 
+    background: linear-gradient(90deg, transparent, #38bdf8, transparent);
+    animation: indeterminate-slide 1.6s infinite ease-in-out;
 }
 @keyframes indeterminate-slide {
     0% { transform: translateX(-100%); }
-    100% { transform: translateX(333%); }
+    100% { transform: translateX(300%); }
 }
 
 textarea {
