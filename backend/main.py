@@ -999,7 +999,23 @@ async def process_transcript(transcript_id: str):
             }
 
 
-# --- Status polling -----------------------------------------------------
+# --- Status polling & DOCX Generation -----------------------------------
+def _parse_formatted_runs(text: str) -> list[tuple[str, bool]]:
+    """Split line into chunks of (text, is_bold) based on markdown **bold**."""
+    runs = []
+    pattern = re.compile(r"\*\*(.+?)\*\*")
+    last_idx = 0
+    for m in pattern.finditer(text):
+        start, end = m.span()
+        if start > last_idx:
+            runs.append((text[last_idx:start], False))
+        runs.append((m.group(1), True))
+        last_idx = end
+    if last_idx < len(text):
+        runs.append((text[last_idx:], False))
+    return runs or [(text, False)]
+
+
 def render_docx(text: str) -> bytes:
     """
     Render protocol text as a .docx with exact Russian court document formatting
@@ -1010,6 +1026,8 @@ def render_docx(text: str) -> bytes:
     - Margins: Left 3.0 cm, Right 1.5 cm, Top 2.0 cm, Bottom 2.0 cm
     - Alignment: Centered for titles, Justified for body text
     - Right-aligned tab stop at 16.5 cm for dates, city, signatures
+    - Converts markdown **bold** into native Word bold runs
+    - Automatically formats signatures nicely with right-aligned tabs
     """
     doc = Document()
 
@@ -1035,18 +1053,26 @@ def render_docx(text: str) -> bytes:
     for line in lines:
         stripped = line.strip()
 
-        # Convert runs of 5+ spaces into tabs for clean tabular layout
-        compact = re.sub(r" {5,}", "\t", line)
+        # Fix collapsed signatures like "ПредседательствующийВ.А. Сидоров" or "Председательствующий В.А. Сидоров"
+        sig_match = re.match(r"^(Председательствующий|Секретарь)(?:\s+|(?=[А-ЯЁ]))(.+)$", stripped)
+        if sig_match:
+            role, name = sig_match.group(1), sig_match.group(2).strip()
+            line = f"{role}\t{name}"
+            stripped = line.strip()
+
+        # Convert runs of 4+ spaces into tabs for clean tabular layout
+        compact = re.sub(r" {4,}", "\t", line)
         p = doc.add_paragraph()
         p.paragraph_format.space_before = Pt(0)
         p.paragraph_format.space_after = Pt(0)
         p.paragraph_format.line_spacing = 1.0
 
         # Title headers: e.g. "ПРОТОКОЛ", "судебного заседания..."
+        clean_header = stripped.replace("*", "").strip()
         is_title = (
-            ("ПРОТОКОЛ" in stripped and len(stripped) < 40)
-            or stripped.startswith("судебного заседания")
-            or stripped.startswith("по уголовному делу")
+            ("ПРОТОКОЛ" in clean_header and len(clean_header) < 40)
+            or clean_header.startswith("судебного заседания")
+            or clean_header.startswith("по уголовному делу")
         )
 
         if is_title:
@@ -1058,20 +1084,25 @@ def render_docx(text: str) -> bytes:
             if stripped and "\t" not in compact:
                 p.paragraph_format.first_line_indent = Cm(1.25)
 
-        run = p.add_run(compact)
-        if is_title:
-            run.bold = True
+        # Parse inline markdown bold **text**
+        chunks = _parse_formatted_runs(compact)
+        for chunk_text, chunk_bold in chunks:
+            if not chunk_text:
+                continue
+            run = p.add_run(chunk_text)
+            if is_title or chunk_bold:
+                run.bold = True
 
-        # Explicit per-run font set for full Cyrillic compatibility in MS Word
-        run.font.name = "Times New Roman"
-        run.font.size = Pt(12)
-        run_rpr = run._r.get_or_add_rPr()
-        run_rfonts = run_rpr.find(qn("w:rFonts"))
-        if run_rfonts is None:
-            run_rfonts = OxmlElement("w:rFonts")
-            run_rpr.insert(0, run_rfonts)
-        for slot in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
-            run_rfonts.set(qn(slot), "Times New Roman")
+            # Explicit per-run font set for full Cyrillic compatibility in MS Word
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(12)
+            run_rpr = run._r.get_or_add_rPr()
+            run_rfonts = run_rpr.find(qn("w:rFonts"))
+            if run_rfonts is None:
+                run_rfonts = OxmlElement("w:rFonts")
+                run_rpr.insert(0, run_rfonts)
+            for slot in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+                run_rfonts.set(qn(slot), "Times New Roman")
 
         if "\t" in compact:
             p.paragraph_format.tab_stops.add_tab_stop(Cm(16.5), WD_TAB_ALIGNMENT.RIGHT)
