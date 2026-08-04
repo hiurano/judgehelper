@@ -179,6 +179,15 @@ def format_metadata_block(meta: dict) -> str:
 # --- App ---------------------------------------------------------------
 app = FastAPI(title="Judge Helper", docs_url="/api/docs")
 
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/") or request.url.path in ("/", "/sw.js"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 # Routes that stay public even when AUTH is enabled.
 # /login itself is obviously public. /static and PWA assets are public so
 # the login page can show icons / install as PWA before authentication.
