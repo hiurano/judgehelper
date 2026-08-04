@@ -32,53 +32,11 @@
             <p class="subtitle">Аудиозапись заседания → черновик протокола</p>
         </div>
         <div style="display:flex;gap:0.5rem;flex-shrink:0;position:relative;align-items:center">
-            <button type="button" id="bell-btn" class="bell-btn" aria-label="История изменений" title="История изменений" style="display: none;">
-                <span class="bell-badge" id="bell-badge" hidden></span>
-            </button>
             <a href="/logout" id="logout-link" style="color:var(--muted);text-decoration:none;font-size:0.9rem;padding:0.6rem 1rem;border:1px solid var(--border);border-radius:8px;white-space:nowrap;display:inline-flex;align-items:center;background:rgba(255,255,255,0.05);transition:all 0.2s;font-weight:500;">Выйти</a>
         </div>
     </div>
 
-    <!-- CHANGELOG popup -->
-    <div id="changelog-popup" hidden>
-        <div class="changelog-header">
-            <h3>История изменений</h3>
-            <button type="button" id="changelog-close-btn" class="changelog-close" aria-label="Закрыть">✕</button>
-        </div>
-        <div id="changelog-list" class="changelog-list"></div>
-    </div>
-
-
-
-    <!-- METADATA (Hidden as requested) -->
-    <details class="card meta-card" id="meta-card" style="display: none;">
-        <summary>Данные дела (необязательно)</summary>
-        <div class="meta-fields">
-            <div>
-                <label for="meta-case">Номер дела</label>
-                <input id="meta-case" type="text" placeholder="например, 1-123/2026" autocomplete="off">
-            </div>
-            <div>
-                <label for="meta-defendant">ФИО подсудимого</label>
-                <input id="meta-defendant" type="text" placeholder="например, Иванов Иван Иванович" autocomplete="off">
-            </div>
-            <div>
-                <label for="meta-statute">Статья УК</label>
-                <input id="meta-statute" type="text" placeholder="например, 158 ч. 2 п. в" autocomplete="off">
-            </div>
-            <div>
-                <label for="meta-judge">Председательствующий</label>
-                <input id="meta-judge" type="text" list="judges-list" placeholder="например, Пономарёв В.А." autocomplete="off">
-                <datalist id="judges-list">
-                    <option value="Пономарёв В.А.">
-                    <option value="Лопатюк М.И.">
-                </datalist>
-                <p class="meta-note">По умолчанию — Пономарёв В.А.</p>
-            </div>
-        </div>
-    </details>
-
-    <!-- IDLE: pick file(s) OR record -->
+    <!-- IDLE: pick file(s) -->
     <div class="card" id="upload-card">
         <div id="drop-zone">
             <p>Перетащите файлы сюда</p>
@@ -88,22 +46,6 @@
         <div class="row">
             <button id="pick-btn" class="secondary big">Выбрать файл(ы)</button>
         </div>
-        <!-- Recording button hidden -->
-        <div class="row" style="display: none;">
-            <button id="record-btn" class="big">Записать заседание</button>
-        </div>
-    </div>
-
-    <!-- RECORDING -->
-    <div class="card" id="recording-card" hidden style="text-align:center; padding: 3rem 1.5rem;">
-        <p style="font-size: 1.1rem; color: var(--text);"><span class="rec-indicator"></span><strong style="letter-spacing: 1px; text-transform: uppercase;">Идёт запись</strong></p>
-        <div class="rec-timer" id="rec-timer">00:00</div>
-        <div class="rec-warning">
-            Не закрывайте приложение и не блокируйте экран
-        </div>
-        <div class="row" style="margin-top: 2rem;">
-            <button id="stop-rec-btn" class="danger big">Остановить запись</button>
-        </div>
     </div>
 
     <!-- QUEUE -->
@@ -112,7 +54,6 @@
         <div id="queue-list"></div>
         <div class="row" style="margin-top: 1.5rem;">
             <button id="add-more-btn" class="secondary">+ Добавить файл</button>
-            <button id="add-more-record-btn" class="secondary" style="display: none;">Записать ещё</button>
             <button id="clear-queue-btn" class="secondary">Очистить</button>
         </div>
     </div>
@@ -124,9 +65,6 @@
         <button class="secondary" onclick="location.reload()">↻ Попробовать снова</button>
     </div>
 </div>
-
-<!-- Hidden text fixture used by render-docx fallback -->
-<textarea id="hidden-staging" style="display:none"></textarea>
 
 <script src="/static/app.js"></script>
 </body>

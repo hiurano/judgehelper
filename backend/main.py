@@ -60,16 +60,15 @@ OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BASE_URL       = os.environ.get("BASE_URL", "").rstrip("/")
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
-MODEL          = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
+MODEL          = os.environ.get("LLM_MODEL", "deepseek/deepseek-v4-flash")
 AUTH_USERNAME  = os.environ.get("AUTH_USERNAME", "")
 AUTH_PASSWORD  = os.environ.get("AUTH_PASSWORD", "")
 
-# Models tried in order; first success wins. Lets us survive a flaky free tier
-# (e.g. Owl Alpha rate-limited or temporarily down).
+# Models tried in order; first success wins.
 LLM_FALLBACK_CHAIN: list[str] = [
     MODEL,
+    "deepseek/deepseek-v4-flash",
     "openai/gpt-4o-mini",
-    "anthropic/claude-3-haiku",
 ]
 # dedupe while preserving order
 _seen = set()
