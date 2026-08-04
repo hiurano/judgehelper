@@ -66,8 +66,8 @@ AUTH_PASSWORD  = os.environ.get("AUTH_PASSWORD", "")
 
 # Models tried in order; first success wins.
 LLM_FALLBACK_CHAIN: list[str] = [
-    MODEL,
     "deepseek/deepseek-v4-flash",
+    MODEL,
     "openai/gpt-4o-mini",
 ]
 # dedupe while preserving order
