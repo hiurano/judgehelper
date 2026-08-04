@@ -1,0 +1,15 @@
+# Local user settings and IDE
+.vscode/
+.claude/
+.venv/
+__pycache__/
+*.pyc
+
+# Local reference docs and temporary scratch files
+references1/
+references2/
+references3/
+done-transcribe/
+scratch/
+*.docx
+*.doc
