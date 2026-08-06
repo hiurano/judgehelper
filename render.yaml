@@ -22,7 +22,7 @@ services:
       - key: ALLOWED_ORIGINS
         value: "*"
       - key: LLM_MODEL
-        value: openai/gpt-4o-mini
+        value: deepseek/deepseek-v4-flash
       - key: AUTH_USERNAME
         sync: false
       - key: AUTH_PASSWORD
