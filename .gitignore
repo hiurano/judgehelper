@@ -1,15 +1,26 @@
-# Local user settings and IDE
+# Local user settings, IDE and virtual environments
 .vscode/
 .claude/
 .venv/
+backend/.venv/
 __pycache__/
 *.pyc
 
+# Environment and secrets
+.env
+.env.local
+
+# Runtime data and logs
+backend/data/
+backend/logs/
+*.db
+*.db-journal
+
 # Local reference docs and temporary scratch files
-references1/
-references2/
-references3/
+references/
 done-transcribe/
 scratch/
 *.docx
 *.doc
+
+

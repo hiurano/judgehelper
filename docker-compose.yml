@@ -1,0 +1,28 @@
+services:
+  judge-helper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: judge-helper
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app/backend
+      - ./backend/data:/app/backend/data
+      - ./backend/logs:/app/backend/logs
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: judge-helper-ngrok
+    restart: unless-stopped
+    command:
+      - "http"
+      - "judge-helper:8000"
+      - "--url=bondless-stopwatch-jumble.ngrok-free.dev"
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    depends_on:
+      - judge-helper

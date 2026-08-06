@@ -3,14 +3,9 @@
 const BACKEND = window.location.origin;
 
 // 401 from a protected endpoint = session expired.
-let sessionExpired = false;
 const _origFetch = window.fetch.bind(window);
 window.fetch = async function (...args) {
-    const resp = await _origFetch(...args);
-    if (resp.status === 401) {
-        sessionExpired = true;
-    }
-    return resp;
+    return await _origFetch(...args);
 };
 
 const $ = (id) => document.getElementById(id);
@@ -18,7 +13,7 @@ const $ = (id) => document.getElementById(id);
 // =========================================================================
 // Card switcher
 // =========================================================================
-const ALL_CARDS = ['upload-card', 'queue-card', 'error-card'];
+const ALL_CARDS = ['upload-card', 'queue-card'];
 function showCard(id) {
     ALL_CARDS.forEach((c) => { 
         const el = $(c);
@@ -105,14 +100,13 @@ function addFilesToQueue(files) {
             filename: f.name,
             sizeMB: (f.size / 1024 / 1024).toFixed(1),
             metadata: fileMeta,
-            status: 'queued',
+            status: 'staged',
             progress: 0,
         };
         queue.push(item);
     }
     showCard('queue-card');
     renderQueue();
-    checkQueueScheduler();
 }
 
 function checkQueueScheduler() {
@@ -160,7 +154,7 @@ function pollQueueItem(item) {
     const MAX_FAILURES = 30; // 30 * 5s = 2.5 minutes grace period for cold-starts/network blips
 
     const checkStatus = async () => {
-        if (item.status === 'done' || item.status === 'error' || item.status === 'transcribed' || item.status === 'auth_required') {
+        if (item.status === 'done' || item.status === 'error' || item.status === 'auth_required') {
             if (item.pollTimer) clearInterval(item.pollTimer);
             return;
         }
@@ -194,14 +188,6 @@ function pollQueueItem(item) {
                 item.duration_min = data.duration_min;
                 item.model = data.model;
                 item.timestamp = new Date().toISOString();
-                renderQueue();
-                checkQueueScheduler();
-                releaseWakeLockIfDone();
-            } else if (data.status === 'transcribed') {
-                if (item.pollTimer) clearInterval(item.pollTimer);
-                item.status = 'transcribed';
-                item.transcript = data.transcript;
-                item.duration_min = data.duration_min;
                 renderQueue();
                 checkQueueScheduler();
                 releaseWakeLockIfDone();
@@ -247,9 +233,6 @@ function uploadFile(item) {
         form.append('file', item.file);
         for (const [k, v] of Object.entries(item.metadata || {})) {
             if (v) form.append(k, v);
-        }
-        if (item.markAsPart) {
-            form.append('is_part', 'true');
         }
         xhr.timeout = 10 * 60 * 1000;
         xhr.upload.onprogress = (e) => {
@@ -297,20 +280,11 @@ function uploadFile(item) {
 // =========================================================================
 // Queue rendering & ETA calculations
 // =========================================================================
-function phaseLabel(phase) {
-    return {
-        'uploading_to_aai': 'Передача файла на сервер…',
-        'transcribing':     'Расшифровка аудио…',
-        'drafting':         'Составление протокола нейросетью…',
-    }[phase] || 'Обработка…';
-}
-
 function estimateTranscribing(item) {
     const nowSec = Date.now() / 1000;
     const startSec = item.aai_started_at || item.created_at || (item.pollStart ? item.pollStart / 1000 : nowSec);
     const elapsedSec = Math.max(0, Math.round(nowSec - startSec));
 
-    // Determine audio length (from AAI or approximate ~2 min per MB for m4a/mp3)
     let audioSec = item.audio_duration_sec;
     if (!audioSec && item.sizeMB && item.sizeMB !== '—') {
         const mb = parseFloat(item.sizeMB);
@@ -319,14 +293,12 @@ function estimateTranscribing(item) {
         }
     }
 
-    // AssemblyAI Universal-2 takes ~20-25% of audio duration (no artificial 600s ceiling)
     const estimatedSec = audioSec ? Math.max(30, Math.round(audioSec * 0.25)) : 180;
 
     let pct = 0;
     if (elapsedSec <= estimatedSec) {
         pct = Math.max(5, Math.round((elapsedSec / estimatedSec) * 90));
     } else {
-        // Smooth asymptotic progress above 90% towards 99%
         const overtime = elapsedSec - estimatedSec;
         const extra = 9 * (1 - Math.exp(-overtime / (estimatedSec * 0.5 || 60)));
         pct = Math.min(99, Math.round(90 + extra));
@@ -355,18 +327,24 @@ function renderQueue() {
         const errCnt  = queue.filter((q) => q.status === 'error').length;
         const stagedCnt = queue.filter((q) => q.status === 'staged').length;
         const inProgCnt = queue.length - doneCnt - errCnt - stagedCnt;
-        const parts = [];
-        if (stagedCnt) parts.push(`${stagedCnt} в очереди`);
-        if (inProgCnt) parts.push(`${inProgCnt} в работе`);
-        if (doneCnt)   parts.push(`${doneCnt} готово`);
-        if (errCnt)    parts.push(`${errCnt} ошибка`);
-        $('queue-title').textContent = parts.length ? `Обработка — ${parts.join(', ')}` : 'Обработка';
+
+        if (stagedCnt > 0 && inProgCnt === 0 && doneCnt === 0 && errCnt === 0) {
+            $('queue-title').textContent = stagedCnt > 1 ? 'Выбранные файлы' : 'Выбранный файл';
+        } else if (errCnt > 0 && inProgCnt === 0 && stagedCnt === 0 && doneCnt === 0) {
+            $('queue-title').textContent = 'Ошибка обработки';
+        } else {
+            const parts = [];
+            if (stagedCnt) parts.push(`${stagedCnt} ожидает`);
+            if (inProgCnt) parts.push(`${inProgCnt} в работе`);
+            if (doneCnt)   parts.push(`${doneCnt} готово`);
+            if (errCnt)    parts.push(`${errCnt} ошибка`);
+            $('queue-title').textContent = parts.length ? `Обработка — ${parts.join(', ')}` : 'Обработка';
+        }
     }
     for (const item of queue) {
         list.appendChild(renderQueueItem(item));
     }
     renderStagedBar();
-    renderMergeBar();
 }
 
 function renderStagedBar() {
@@ -374,9 +352,9 @@ function renderStagedBar() {
     if (!bar) {
         bar = document.createElement('div');
         bar.id = 'staged-bar';
-        bar.style.cssText = 'padding:1.5rem 0 0; margin-top:1.5rem; border-top:1px solid var(--border); display:flex; align-items:center; gap:1rem; flex-wrap:wrap';
-        const list = $('queue-list');
-        if (list && list.parentNode) list.parentNode.insertBefore(bar, list.nextSibling);
+        bar.style.cssText = 'display:flex; align-items:center; gap:1rem; flex-wrap:wrap';
+        const container = $('staged-bar-container') || $('queue-card');
+        if (container) container.appendChild(bar);
     }
     const staged = queue.filter((q) => q.status === 'staged');
     if (staged.length < 1) {
@@ -396,89 +374,93 @@ function renderStagedBar() {
     bar.appendChild(goBtn);
 }
 
-function renderMergeBar() {
-    let bar = $('merge-bar');
-    if (!bar) {
-        bar = document.createElement('div');
-        bar.id = 'merge-bar';
-        bar.style.cssText = 'padding:1.5rem 0 0; margin-top:1.5rem; border-top:1px solid var(--border); display:flex; align-items:center; gap:1rem; flex-wrap:wrap';
-        const list = $('queue-list');
-        if (list && list.parentNode) list.parentNode.insertBefore(bar, list.nextSibling);
+function getOverallProgressInfo(item) {
+    let audioSec = item.audio_duration_sec;
+    if (!audioSec && item.sizeMB && item.sizeMB !== '—') {
+        const mb = parseFloat(item.sizeMB);
+        if (!isNaN(mb) && mb > 0) audioSec = mb * 120;
     }
-    const selected = queue.filter((q) => q.selected && (q.status === 'done' || q.status === 'transcribed'));
-    if (selected.length < 2) {
-        bar.style.display = 'none';
-        return;
+    const totalEstSec = audioSec ? Math.max(45, Math.round(audioSec * 0.25 + 35)) : 180;
+    const totalElapsed = item.created_at ? Math.max(0, Math.round(Date.now() / 1000 - item.created_at)) : phaseElapsedSec(item);
+    const remainingSec = Math.max(0, totalEstSec - totalElapsed);
+    const timeStr = (totalElapsed < totalEstSec && remainingSec > 0)
+        ? `осталось ≈ ${formatHMS(remainingSec)}`
+        : `завершение… (${formatHMS(totalElapsed)})`;
+
+    if (item.status === 'uploading') {
+        const uploadPct = Math.min(99, item.progress || 0);
+        const overallPct = Math.max(3, Math.round(uploadPct * 0.15));
+        return {
+            stageText: 'Загрузка файла на сервер…',
+            timeText: timeStr,
+            pct: overallPct
+        };
     }
-    bar.style.display = 'flex';
-    bar.innerHTML = '';
-    const label = document.createElement('div');
-    label.style.cssText = 'flex:1;min-width:200px';
-    label.innerHTML = `<strong>Выбрано ${selected.length}</strong> — объединить как одно заседание?`;
-    bar.appendChild(label);
-    const mergeBtn = document.createElement('button');
-    mergeBtn.textContent = 'Объединить';
-    mergeBtn.addEventListener('click', () => mergeSelectedAsSession(selected));
-    bar.appendChild(mergeBtn);
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'secondary';
-    cancelBtn.textContent = 'Отмена';
-    cancelBtn.addEventListener('click', () => {
-        queue.forEach((q) => q.selected = false);
-        renderQueue();
-    });
-    bar.appendChild(cancelBtn);
-}
 
-async function mergeSelectedAsSession(selected) {
-    const transcriptIds = selected.map((s) => s.jobId).filter(Boolean);
-    if (transcriptIds.length < 2) {
-        alert('Не удалось определить ID частей. Подождите пока все записи получат transcript_id.');
-        return;
-    }
-    queue.forEach((q) => q.selected = false);
-
-    const sessionItem = {
-        key: 'ses_' + Math.random().toString(36).slice(2, 10),
-        filename: `Заседание из ${transcriptIds.length} частей`,
-        sizeMB: '—',
-        metadata: selected[0]?.metadata || {},
-        status: 'processing',
-        phase: 'drafting',
-        pollStart: Date.now(),
-        isSession: true,
-    };
-    queue.unshift(sessionItem);
-    renderQueue();
-    acquireWakeLock();
-
-    try {
-        const resp = await fetch(`${BACKEND}/combine-and-draft`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                transcript_ids: transcriptIds,
-                metadata: sessionItem.metadata,
-            }),
-        });
-        if (!resp.ok) {
-            const errText = await resp.text();
-            throw new Error(`HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+    if (item.status === 'processing') {
+        if (item.reconnecting) {
+            return {
+                stageText: 'Восстановление связи…',
+                timeText: timeStr,
+                pct: 50
+            };
         }
-        const data = await resp.json();
-        sessionItem.jobId = data.job_id;
-        renderQueue();
-        pollQueueItem(sessionItem);
-    } catch (err) {
-        sessionItem.status = 'error';
-        sessionItem.error = err.message || String(err);
-        renderQueue();
-        releaseWakeLockIfDone();
+
+        if (item.phase === 'uploading_to_aai') {
+            return {
+                stageText: 'Передача в нейросеть…',
+                timeText: timeStr,
+                pct: 20
+            };
+        }
+
+        if (item.phase === 'transcribing') {
+            const est = estimateTranscribing(item);
+            let transPct = 40;
+            if (est) {
+                transPct = Math.round(25 + (est.pct * 0.55));
+            }
+            return {
+                stageText: 'Расшифровка аудио…',
+                timeText: timeStr,
+                pct: transPct
+            };
+        }
+
+        if (item.phase === 'drafting') {
+            const draftElapsed = item.drafting_started_at
+                ? Math.round(Date.now() / 1000 - item.drafting_started_at)
+                : phaseElapsedSec(item);
+            const draftPct = Math.min(96, Math.round(80 + (draftElapsed / 40) * 16));
+            return {
+                stageText: 'Составление протокола нейросетью…',
+                timeText: timeStr,
+                pct: draftPct
+            };
+        }
+
+        return {
+            stageText: 'Обработка…',
+            timeText: timeStr,
+            pct: 50
+        };
     }
+
+    if (item.status === 'done') {
+        return { stageText: `Готово · ${item.duration_min ?? '—'} мин`, timeText: '', pct: 100 };
+    }
+    if (item.status === 'staged') {
+        return { stageText: 'Готов к обработке', timeText: '', pct: 0 };
+    }
+    if (item.status === 'error') {
+        return { stageText: 'Ошибка обработки', timeText: '', pct: 0 };
+    }
+    return { stageText: 'В очереди…', timeText: '', pct: 0 };
 }
 
 function renderQueueItem(item) {
     const wrap = document.createElement('div');
+    wrap.setAttribute('data-key', item.key);
     wrap.className = 'queue-item ' + (
         item.status === 'done' ? 'done' :
         (item.status === 'error' || item.status === 'auth_required') ? 'error' : ''
@@ -489,7 +471,7 @@ function renderQueueItem(item) {
 
     const name = document.createElement('div');
     name.className = 'queue-name';
-    name.textContent = (item.isSession ? 'Часть: ' : '') + item.filename;
+    name.textContent = item.filename;
     head.appendChild(name);
     if (item.sizeMB && item.sizeMB !== '—') {
         const size = document.createElement('span');
@@ -514,136 +496,65 @@ function renderQueueItem(item) {
     if (item.status === 'done') {
         const btns = document.createElement('div');
         btns.style.cssText = 'margin-left: auto; display: flex; gap: 0.5rem;';
-        
-        const txtBtn = document.createElement('button');
-        txtBtn.className = 'small secondary';
-        txtBtn.textContent = 'Сырой текст (.txt)';
-        txtBtn.addEventListener('click', () => {
-            downloadTxt(item.transcript, makeFilename({
-                metadata: item.metadata,
-                timestamp: item.timestamp,
-                filename: item.filename,
-            }));
-        });
-        btns.appendChild(txtBtn);
 
         const dlBtn = document.createElement('button');
         dlBtn.className = 'small';
-        dlBtn.textContent = 'Готовый .docx';
+        dlBtn.textContent = 'Скачать .docx';
         dlBtn.addEventListener('click', async () => {
-            const text = item.expanded
-                ? (document.getElementById('draft-' + item.key)?.value || item.draft)
-                : item.draft;
-            await downloadDocx(text, makeFilename({
+            await downloadDocx(item.draft, makeFilename({
                 metadata: item.metadata,
                 timestamp: item.timestamp,
                 filename: item.filename,
             }));
         });
         btns.appendChild(dlBtn);
-        
         head.appendChild(btns);
     }
     
     wrap.appendChild(head);
 
-    // Status row
+    // Status row (Left: text, Right: remaining time)
     const status = document.createElement('div');
     status.className = 'queue-status';
-    if (item.status === 'uploading') {
-        const sp = document.createElement('div'); sp.className = 'spinner'; status.appendChild(sp);
-        const t = document.createElement('span');
-        t.textContent = item.uploadDone
-            ? 'Получение ответа сервера…'
-            : `Загрузка файла… ${item.progress}%`;
-        status.appendChild(t);
-    } else if (item.status === 'processing') {
-        const sp = document.createElement('div'); sp.className = 'spinner'; status.appendChild(sp);
-        const t = document.createElement('span');
-        const elapsed = phaseElapsedSec(item);
-        
-        if (item.reconnecting) {
-            t.style.color = '#f59e0b';
-            t.textContent = `Связь с сервером восстанавливается… (${formatHMS(elapsed)})`;
-        } else if (item.phase === 'uploading_to_aai') {
-            t.textContent = `Передача на сервер расшифровки… (${formatHMS(elapsed)})`;
-        } else if (item.phase === 'transcribing') {
-            const est = estimateTranscribing(item);
-            if (est) {
-                if (est.isOvertime) {
-                    t.textContent = `Расшифровка аудио: ${est.pct}% · ${formatHMS(est.elapsedSec)} (завершение…)`;
-                } else {
-                    t.textContent = `Расшифровка аудио: ${est.pct}% · ${formatHMS(est.elapsedSec)} из ≈${formatHMS(est.estimatedSec)}`;
-                }
-            } else {
-                t.textContent = `Расшифровка аудио… (${formatHMS(elapsed)})`;
-            }
-        } else if (item.phase === 'drafting') {
-            t.textContent = `Составление протокола нейросетью… (${formatHMS(elapsed)})`;
-        } else {
-            t.textContent = phaseLabel(item.phase) + (elapsed ? ` (${formatHMS(elapsed)})` : '');
-        }
-        status.appendChild(t);
-    } else if (item.status === 'done') {
-        const t = document.createElement('span');
-        t.className = 'badge-done';
-        t.innerHTML = `Готово · ${item.duration_min ?? '—'} мин · ${(item.draft?.length || 0).toLocaleString('ru')} символов`;
-        status.appendChild(t);
-    } else if (item.status === 'transcribed') {
-        const t = document.createElement('span');
-        t.className = 'badge-done';
-        t.textContent = `Расшифровано · ${item.duration_min ?? '—'} мин · готово к объединению`;
-        status.appendChild(t);
-    } else if (item.status === 'auth_required') {
-        const t = document.createElement('span');
-        t.className = 'badge-error';
-        t.textContent = 'Войдите заново';
-        status.appendChild(t);
+    status.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.875rem;';
+
+    const info = getOverallProgressInfo(item);
+    const stageSpan = document.createElement('span');
+    stageSpan.className = 'queue-stage-text';
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'queue-time-text';
+    timeSpan.style.cssText = 'color: var(--text-muted); font-size: 0.825rem; white-space: nowrap;';
+
+    if (item.status === 'done') {
+        stageSpan.className = 'badge-done queue-stage-text';
+        stageSpan.innerHTML = `Готово · ${item.duration_min ?? '—'} мин · ${(item.draft?.length || 0).toLocaleString('ru')} символов`;
     } else if (item.status === 'error') {
-        const t = document.createElement('span');
-        t.className = 'badge-error';
-        t.textContent = 'Ошибка';
-        status.appendChild(t);
+        stageSpan.className = 'badge-error queue-stage-text';
+        stageSpan.textContent = 'Ошибка';
     } else if (item.status === 'staged') {
-        const t = document.createElement('span');
-        t.style.color = 'var(--muted)';
-        t.textContent = 'Готов к обработке';
-        status.appendChild(t);
+        stageSpan.style.color = 'var(--text-muted)';
+        stageSpan.textContent = 'Готов к обработке';
     } else {
-        const t = document.createElement('span');
-        t.textContent = 'В очереди…';
-        status.appendChild(t);
+        stageSpan.textContent = info.stageText;
+        timeSpan.textContent = info.timeText;
+    }
+
+    status.appendChild(stageSpan);
+    if (info.timeText && item.status !== 'done' && item.status !== 'error') {
+        status.appendChild(timeSpan);
     }
     wrap.appendChild(status);
 
-    // Progress bar
-    if (item.status === 'uploading') {
+    // Continuous progress bar
+    if (item.status === 'uploading' || item.status === 'processing') {
         const prWrap = document.createElement('div');
         prWrap.className = 'custom-progress';
+        prWrap.style.cssText = 'margin-top: 0.5rem; background: rgba(255,255,255,0.08); height: 6px; border-radius: 3px; overflow: hidden;';
+        
         const prBar = document.createElement('div');
         prBar.className = 'custom-progress-bar';
-        if (item.uploadDone) {
-            prBar.classList.add('indeterminate');
-        } else {
-            prBar.style.width = (item.progress || 0) + '%';
-        }
-        prWrap.appendChild(prBar);
-        wrap.appendChild(prWrap);
-    } else if (item.status === 'processing') {
-        const prWrap = document.createElement('div');
-        prWrap.className = 'custom-progress';
-        const prBar = document.createElement('div');
-        prBar.className = 'custom-progress-bar';
-        if (item.phase === 'transcribing') {
-            const est = estimateTranscribing(item);
-            if (est) {
-                prBar.style.width = est.pct + '%';
-            } else {
-                prBar.classList.add('indeterminate');
-            }
-        } else {
-            prBar.classList.add('indeterminate');
-        }
+        prBar.style.cssText = `width: ${info.pct}%; height: 100%; background: var(--accent-primary); border-radius: 3px; transition: width 0.4s ease;`;
+        
         prWrap.appendChild(prBar);
         wrap.appendChild(prWrap);
     }
@@ -672,59 +583,53 @@ function renderQueueItem(item) {
         retryBtn.className = 'secondary small';
         retryBtn.textContent = '↻ Попробовать снова';
         retryBtn.addEventListener('click', () => {
-            sessionExpired = false;
             item.status = 'queued';
             renderQueue();
             checkQueueScheduler();
         });
         actions.appendChild(retryBtn);
-    } else if (item.status === 'error' && item.jobId) {
-        const checkBtn = document.createElement('button');
-        checkBtn.className = 'secondary small';
-        checkBtn.textContent = '↻ Проверить статус снова';
-        checkBtn.addEventListener('click', () => {
-            item.status = 'processing';
+    } else if (item.status === 'error') {
+        const retryBtn = document.createElement('button');
+        retryBtn.className = 'secondary small';
+        retryBtn.textContent = '↻ Попробовать снова';
+        retryBtn.addEventListener('click', () => {
+            item.status = 'queued';
             item.error = null;
+            item.jobId = null;
             item.reconnecting = false;
             renderQueue();
-            pollQueueItem(item);
-            if (typeof item.forceCheck === 'function') {
-                item.forceCheck();
-            }
+            checkQueueScheduler();
         });
-        actions.appendChild(checkBtn);
+        actions.appendChild(retryBtn);
     }
 
     if (actions.children.length) wrap.appendChild(actions);
-
-    // Expanded view: editable draft
-    if (item.expanded && item.status === 'done') {
-        const warn = document.createElement('div');
-        warn.className = 'warning';
-        warn.innerHTML = '<strong>Это черновик.</strong> Правки сохраняются — скачайте .docx чтобы они попали в файл.';
-        wrap.appendChild(warn);
-
-        const ta = document.createElement('textarea');
-        ta.id = 'draft-' + item.key;
-        ta.spellcheck = false;
-        ta.value = item.draft;
-        ta.addEventListener('input', () => {
-            item.draft = ta.value;
-        });
-        wrap.appendChild(ta);
-    }
-
     return wrap;
 }
 
-// Update processing timers
+function updateProcessingItems() {
+    for (const item of queue) {
+        if (item.status !== 'processing' && item.status !== 'uploading') continue;
+        const wrap = document.querySelector(`.queue-item[data-key="${item.key}"]`);
+        if (!wrap) continue;
+        const info = getOverallProgressInfo(item);
+        const stageSpan = wrap.querySelector('.queue-stage-text');
+        const timeSpan = wrap.querySelector('.queue-time-text');
+        const prBar = wrap.querySelector('.custom-progress-bar');
+
+        if (stageSpan) stageSpan.textContent = info.stageText;
+        if (timeSpan) timeSpan.textContent = info.timeText;
+        if (prBar) prBar.style.width = info.pct + '%';
+    }
+}
+
+// Update processing timers efficiently without rebuilding DOM tree
 setInterval(() => {
-    const editing = document.activeElement && (
-        document.activeElement.tagName === 'TEXTAREA' ||
-        document.activeElement.tagName === 'INPUT'
-    );
+    const editing = document.activeElement && document.activeElement.tagName === 'INPUT';
     if (editing) return;
-    if (queue.some((q) => q.status === 'processing')) renderQueue();
+    if (queue.some((q) => q.status === 'processing' || q.status === 'uploading')) {
+        updateProcessingItems();
+    }
 }, 1000);
 
 // =========================================================================
@@ -767,18 +672,7 @@ if (fileInput) {
     });
 }
 
-// =========================================================================
-// Queue controls & Downloads
-// =========================================================================
-const clearBtn = $('clear-queue-btn');
-if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
-        queue.forEach((q) => { if (q.pollTimer) clearInterval(q.pollTimer); });
-        queue = [];
-        showCard('upload-card');
-    });
-}
-
+// Downloads & Error helper
 async function downloadDocx(text, filename) {
     if (!text || !text.trim()) return;
     try {
@@ -814,22 +708,6 @@ function downloadTxt(text, filename) {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-}
-
-function showError(msg) {
-    releaseWakeLock();
-    showCard('error-card');
-    const el = $('error-text');
-    if (el) el.textContent = msg;
-}
-
-// ServiceWorker cleanup
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-        for (const r of registrations) {
-            r.unregister();
-        }
-    });
 }
 
 // Re-check jobs immediately on tab activation / unlock / online

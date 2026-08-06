@@ -1,17 +1,18 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
 # Install dependencies
-COPY backend/requirements.txt ./requirements.txt
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code
-COPY backend ./backend
-COPY prompts ./prompts
+# Copy application source code and prompts
+COPY backend/ /app/backend/
+COPY prompts/ /app/prompts/
 
-# Hugging Face Spaces defaults to port 7860
-ENV PORT=7860
-EXPOSE 7860
+EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

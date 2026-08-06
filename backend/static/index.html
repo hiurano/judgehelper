@@ -7,7 +7,7 @@
 
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#09090b">
+    <meta name="theme-color" content="#232A2E">
 
     <!-- iOS-specific -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -15,24 +15,25 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Протокол">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="/static/style.css?v=4">
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 <body>
 <div id="global-dropzone">
-    <h2>Бросайте файлы куда угодно</h2>
+    <h2>Бросайте файлы сюда</h2>
 </div>
 <div class="container">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;margin-bottom:2rem">
         <div style="min-width:0;flex:1">
             <h1>Помощник секретаря</h1>
-            <p class="subtitle">Аудиозапись заседания → черновик протокола</p>
         </div>
         <div style="display:flex;gap:0.5rem;flex-shrink:0;position:relative;align-items:center">
-            <a href="/logout" id="logout-link" style="color:var(--muted);text-decoration:none;font-size:0.9rem;padding:0.6rem 1rem;border:1px solid var(--border);border-radius:8px;white-space:nowrap;display:inline-flex;align-items:center;background:rgba(255,255,255,0.05);transition:all 0.2s;font-weight:500;">Выйти</a>
+            <a href="/logout" id="logout-link">Выйти</a>
         </div>
     </div>
 
@@ -52,20 +53,14 @@
     <div class="card" id="queue-card" hidden>
         <h2 id="queue-title">Обработка</h2>
         <div id="queue-list"></div>
-        <div class="row" style="margin-top: 1.5rem;">
-            <button id="add-more-btn" class="secondary">+ Добавить файл</button>
-            <button id="clear-queue-btn" class="secondary">Очистить</button>
+        <div style="margin-top: 1rem;">
+            <button id="add-more-btn" class="secondary" style="width: 100%;">+ Добавить ещё файл</button>
         </div>
+        <div id="staged-bar-container" style="margin-top: 1.25rem;"></div>
     </div>
 
-    <!-- ERROR -->
-    <div class="card" id="error-card" hidden>
-        <h2 class="error-msg">Ошибка</h2>
-        <p id="error-text" style="margin-bottom:1.5rem;"></p>
-        <button class="secondary" onclick="location.reload()">↻ Попробовать снова</button>
-    </div>
 </div>
 
-<script src="/static/app.js?v=4"></script>
+<script src="/static/app.js?v=14"></script>
 </body>
 </html>
