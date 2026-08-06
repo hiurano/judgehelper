@@ -1,6 +1,9 @@
 .venv/
+backend/.venv/
 .git/
 .gitignore
+.vscode/
+.claude/
 __pycache__/
 *.pyc
 *.pyo
@@ -11,8 +14,9 @@ backend/logs/
 *.db
 *.log
 .env
+.env.*
 README.md
 ARCHITECTURE.md
-references1/
-references2/
-references3/
+references/
+scratch/
+done-transcribe/
