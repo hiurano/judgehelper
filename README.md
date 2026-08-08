@@ -28,8 +28,8 @@
 
 - **Backend:** Python 3.11+, FastAPI, Uvicorn, SQLite3, `httpx`, `python-docx`
 - **AI Services:** AssemblyAI (Speech-to-Text), OpenRouter (LLM DeepSeek / Gemini / OpenAI)
-- **Frontend:** HTML5, CSS3 (Everforest Dark Medium), Vanilla JavaScript, PWA
-- **Инфраструктура:** Docker, Docker Compose, Ngrok
+- **Frontend:** HTML5, CSS3 (Noctalia Monochrome), Vanilla JavaScript, PWA
+- **Инфраструктура:** Docker, Docker Compose, Caddy (Reverse Proxy & Auto-HTTPS)
 
 ---
 
@@ -46,7 +46,7 @@ OPENROUTER_API_KEY=your_openrouter_key
 LLM_MODEL=deepseek/deepseek-v4-flash-0731
 
 # Сетевые настройки и вебхуки
-BASE_URL=https://your-domain.com
+BASE_URL=https://your-domain.sslip.io
 WEBHOOK_SECRET=your_webhook_secret
 ALLOWED_ORIGINS=*
 
@@ -56,9 +56,6 @@ AUTH_PASSWORD=your_secure_password
 
 # Настройки базы данных и хранения
 JOB_TTL_DAYS=30
-
-# Ngrok Токен
-NGROK_AUTHTOKEN=your_ngrok_token
 ```
 
 ---
@@ -77,9 +74,7 @@ NGROK_AUTHTOKEN=your_ngrok_token
 - **Просмотр логов:** `docker compose logs -f`
 - **Остановка:** `docker compose down`
 
-После запуска сервис автоматически доступен:
-- Локально: **`http://localhost:8000`**
-- Удалённо (для мамы): по вашей постоянной ссылке Ngrok из `.env`.
+После запуска Caddy автоматически выпустит бесплатный SSL-сертификат (Let's Encrypt), и сервис будет доступен по защищённому адресу **`https://your-domain.sslip.io`** (порты 80 и 443).
 
 ---
 
