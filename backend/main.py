@@ -158,18 +158,20 @@ async def health():
 # --- API Endpoints ------------------------------------------------------
 @app.post("/upload")
 async def upload(
+    request: Request,
     file: UploadFile = File(...),
     defendant: str = Form(""),
 ):
     if not ASSEMBLYAI_KEY:
         raise HTTPException(500, "AssemblyAI key not configured on server")
 
+    user_id = getattr(request.state, "user", "elena")
     audio = await file.read()
     size_mb = len(audio) / 1024 / 1024
     metadata = {
         "defendant": defendant.strip(),
     }
-    log.info(f"Received {file.filename} ({size_mb:.1f} MB); defendant: {defendant}")
+    log.info(f"Received {file.filename} ({size_mb:.1f} MB) for user {user_id}; defendant: {defendant}")
 
     temp_id = "tmp-" + uuid.uuid4().hex[:24]
     jobs[temp_id] = {
@@ -179,7 +181,9 @@ async def upload(
         "size_mb": round(size_mb, 1),
         "filename": file.filename or "",
         "created_at": int(time.time()),
+        "user_id": user_id,
     }
+
     asyncio.create_task(submit_to_assemblyai(temp_id, audio, file.filename or "audio"))
     return {"job_id": temp_id}
 
@@ -226,7 +230,7 @@ async def status(job_id: str):
         job_id = real_id
         cached = real_cached
 
-    if cached and cached.get("status") in ("done", "error", "transcribed"):
+    if cached and cached.get("status") in ("done", "error"):
         return cached
 
     client = http_client or httpx.AsyncClient(timeout=30.0)
@@ -269,6 +273,49 @@ async def status(job_id: str):
     if not lock.locked():
         asyncio.create_task(process_transcript(job_id))
     return cached_now
+
+
+@app.get("/jobs")
+async def list_jobs(request: Request):
+    user_id = getattr(request.state, "user", "elena")
+    recent = jobs.list_recent(user_id=user_id, limit=30)
+    seen_ids = set()
+    cleaned = []
+    for item in recent:
+        job_id = item.get("id")
+        if not job_id or job_id in seen_ids:
+            continue
+        real_id = item.get("real_job_id")
+        if real_id and any(r.get("id") == real_id for r in recent):
+            continue
+        seen_ids.add(job_id)
+        cleaned.append({
+            "id": job_id,
+            "status": item.get("status"),
+            "phase": item.get("phase"),
+            "filename": item.get("filename"),
+            "duration_min": item.get("duration_min"),
+            "metadata": item.get("metadata", {}),
+            "created_at": item.get("created_at"),
+            "updated_at": item.get("updated_at"),
+            "draft": item.get("draft") if item.get("status") == "done" else None,
+            "error": item.get("error") if item.get("status") == "error" else None,
+        })
+    return {"jobs": cleaned}
+
+
+@app.get("/api/me")
+async def get_me(request: Request):
+    user_id = getattr(request.state, "user", "elena")
+    stats = jobs.get_user_stats(user_id)
+    display_name = user_id.capitalize()
+    return {
+        "username": user_id,
+        "display_name": display_name,
+        "plan": "Персональный",
+        "total_protocols": stats["total_protocols"],
+        "total_duration_min": stats["total_duration_min"],
+    }
 
 
 @app.post("/render-docx")

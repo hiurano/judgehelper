@@ -33,11 +33,20 @@ class JobStore:
                 """CREATE TABLE IF NOT EXISTS jobs (
                     id TEXT PRIMARY KEY,
                     data TEXT NOT NULL,
-                    updated_at INTEGER NOT NULL
+                    updated_at INTEGER NOT NULL,
+                    user_id TEXT DEFAULT 'elena'
                 )"""
             )
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+            if "user_id" not in cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN user_id TEXT DEFAULT 'elena'")
+                conn.execute("UPDATE jobs SET user_id = 'elena' WHERE user_id IS NULL")
+
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)"
             )
 
     @contextmanager
@@ -75,13 +84,15 @@ class JobStore:
     def __setitem__(self, job_id: str, data: dict):
         payload = json.dumps(data, ensure_ascii=False, default=str)
         ts = int(time.time())
+        user_id = data.get("user_id", "elena")
         with self._lock, self._conn() as conn:
             conn.execute(
-                """INSERT INTO jobs (id, data, updated_at) VALUES (?, ?, ?)
+                """INSERT INTO jobs (id, data, updated_at, user_id) VALUES (?, ?, ?, ?)
                    ON CONFLICT(id) DO UPDATE SET
                        data = excluded.data,
-                       updated_at = excluded.updated_at""",
-                (job_id, payload, ts),
+                       updated_at = excluded.updated_at,
+                       user_id = COALESCE(excluded.user_id, jobs.user_id)""",
+                (job_id, payload, ts, user_id),
             )
 
     def __contains__(self, job_id: str) -> bool:
@@ -103,6 +114,51 @@ class JobStore:
                 locks.pop(k, None)
 
         return deleted
+
+    def list_recent(self, user_id: str = None, limit: int = 30) -> list:
+        with self._lock, self._conn() as conn:
+            if user_id:
+                rows = conn.execute(
+                    "SELECT id, data, updated_at FROM jobs WHERE (user_id = ? OR user_id IS NULL) ORDER BY updated_at DESC LIMIT ?",
+                    (user_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, data, updated_at FROM jobs ORDER BY updated_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        results = []
+        for job_id, data_str, updated_at in rows:
+            try:
+                data = json.loads(data_str)
+                data["id"] = job_id
+                data["updated_at"] = updated_at
+                results.append(data)
+            except Exception:
+                continue
+        return results
+
+    def get_user_stats(self, user_id: str = "elena") -> dict:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT data FROM jobs WHERE id NOT LIKE 'tmp-%' AND (user_id = ? OR user_id IS NULL)", (user_id,)
+            ).fetchall()
+        total_count = 0
+        total_sec = 0.0
+        for (data_str,) in rows:
+            try:
+                data = json.loads(data_str)
+                if data.get("status") == "done":
+                    total_count += 1
+                    dur = data.get("duration_min") or (data.get("audio_duration_sec", 0) / 60.0)
+                    total_sec += (dur * 60.0)
+            except Exception:
+                continue
+        total_min = round(total_sec / 60.0, 1)
+        return {
+            "total_protocols": total_count,
+            "total_duration_min": total_min,
+        }
 
 
 jobs = JobStore(DB_PATH)

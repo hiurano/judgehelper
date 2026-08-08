@@ -48,6 +48,7 @@ LLM_FALLBACK_CHAIN: list[str] = list(dict.fromkeys([
 ]))
 
 SYSTEM_PROMPT_PATH = PROJECT_DIR / "prompts" / "system-protocol.md"
+SYSTEM_PROMPT_EXAMPLE_PATH = PROJECT_DIR / "prompts" / "system-protocol.md.example"
 STATIC_DIR = BACKEND_DIR / "static"
 
 for name, val in [
@@ -63,8 +64,12 @@ SYSTEM_PROMPT = ""
 if SYSTEM_PROMPT_PATH.exists():
     SYSTEM_PROMPT = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
     log.info(f"Loaded system prompt: {len(SYSTEM_PROMPT)} chars from {SYSTEM_PROMPT_PATH}")
+elif SYSTEM_PROMPT_EXAMPLE_PATH.exists():
+    SYSTEM_PROMPT = SYSTEM_PROMPT_EXAMPLE_PATH.read_text(encoding="utf-8")
+    log.info(f"Loaded example system prompt: {len(SYSTEM_PROMPT)} chars from {SYSTEM_PROMPT_EXAMPLE_PATH}")
 else:
-    log.error(f"System prompt not found at {SYSTEM_PROMPT_PATH}")
+    log.error(f"System prompt not found at {SYSTEM_PROMPT_PATH} or {SYSTEM_PROMPT_EXAMPLE_PATH}")
+
 
 WORD_BOOST = [
     "ходатайство", "определение суда", "прения сторон", "последнее слово",

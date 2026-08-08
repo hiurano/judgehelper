@@ -119,7 +119,7 @@ def render_docx(text: str) -> bytes:
             or clean_header.startswith("судебного заседания")
             or clean_header.startswith("по уголовному делу")
         )
-        is_city_line = stripped.startswith("г. Нижневартовск") or stripped.startswith("г.Нижневартовск")
+        is_city_line = bool(CITY_CHECK_PATTERN.match(stripped))
 
         if is_title:
             p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER

@@ -33,6 +33,18 @@ PUBLIC_PATHS = {
     "/favicon.ico",
 }
 PUBLIC_PREFIXES = ("/static/",)
+USERS = {
+    "elena": "protocol2026",
+    "test": "Test-2026",
+}
+if AUTH_USERNAME and AUTH_PASSWORD:
+    USERS[AUTH_USERNAME] = AUTH_PASSWORD
+
+
+def verify_user_credentials(username: str, password: str) -> bool:
+    if username in USERS:
+        return secrets.compare_digest(password, USERS[username])
+    return False
 
 
 def _session_secret() -> str:
@@ -73,12 +85,11 @@ async def session_auth_middleware(request: Request, call_next):
     path = request.url.path
     if path in PUBLIC_PATHS or any(path.startswith(p) for p in PUBLIC_PREFIXES):
         return await call_next(request)
-    if not (AUTH_USERNAME and AUTH_PASSWORD):
-        return await call_next(request)
 
     token = request.cookies.get(SESSION_COOKIE)
     username = verify_session_token(token)
-    if username == AUTH_USERNAME:
+    if username and username in USERS:
+        request.state.user = username
         return await call_next(request)
 
     if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
@@ -94,7 +105,7 @@ LOGIN_HTML = """<!DOCTYPE html>
     <title>Вход — Помощник секретаря</title>
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <meta name="theme-color" content="#232A2E">
+    <meta name="theme-color" content="#111111">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -105,19 +116,37 @@ LOGIN_HTML = """<!DOCTYPE html>
             margin: 0; min-height: 100vh;
             display: flex; align-items: center; justify-content: center;
             padding: 1.5rem;
-            background: #232A2E;
-            color: #D3C6AA;
+            background: #111111;
+            color: #E0E0E0;
             -webkit-text-size-adjust: 100%;
         }
+        .login-wrapper {
+            display: flex;
+            align-items: stretch;
+            justify-content: center;
+            gap: 1.75rem;
+            width: 100%;
+            max-width: 820px;
+        }
+        @media (max-width: 768px) {
+            .login-wrapper {
+                flex-direction: column;
+                max-width: 400px;
+            }
+            .changelog-card {
+                display: none;
+            }
+        }
         .card {
-            background: #2D353B; border: 1px solid #475258;
+            background: #191919; border: 1px solid #3C3C3C;
             border-radius: 14px; padding: 2.25rem 1.75rem;
-            box-shadow: 0 16px 32px rgba(0,0,0,0.25);
-            width: 100%; max-width: 380px;
+            box-shadow: 0 16px 32px rgba(0,0,0,0.4);
+            flex: 1;
+            min-width: 320px;
         }
         .logo {
             width: 64px; height: 64px; margin: 0 auto 1.25rem;
-            background: #A7C080; color: #1E2326;
+            background: #AAAAAA; color: #111111;
             border-radius: 14px;
             display: flex; align-items: center; justify-content: center;
             font-size: 1.5rem; font-weight: 700;
@@ -126,72 +155,178 @@ LOGIN_HTML = """<!DOCTYPE html>
         h1 {
             text-align: center; margin: 0 0 0.35rem;
             font-size: 1.35rem; font-weight: 600;
-            color: #D3C6AA;
+            color: #E0E0E0;
         }
         .subtitle {
-            text-align: center; color: #859289;
+            text-align: center; color: #828282;
             margin: 0 0 1.75rem; font-size: 0.9rem;
         }
         .error {
-            background: rgba(230, 126, 128, 0.08); border: 1px solid rgba(230, 126, 128, 0.3);
-            color: #E67E80;
+            background: rgba(221, 221, 221, 0.1); border: 1px solid rgba(221, 221, 221, 0.3);
+            color: #DDDDDD;
             border-radius: 8px; padding: 0.625rem 0.875rem;
             font-size: 0.85rem; margin-bottom: 1.25rem;
         }
         label {
             display: block; margin-bottom: 1rem;
-            font-size: 0.85rem; color: #859289; font-weight: 500;
+            font-size: 0.85rem; color: #828282; font-weight: 500;
         }
         input {
             display: block; width: 100%;
             margin-top: 0.375rem;
             padding: 0.75rem 0.875rem;
-            border: 1px solid #475258; border-radius: 8px;
+            border: 1px solid #3C3C3C; border-radius: 8px;
             font-size: 0.95rem; font-family: inherit;
             min-height: 44px;
-            background: #1E2326; color: #D3C6AA;
+            background: #151515; color: #E0E0E0;
             -webkit-appearance: none;
             transition: border-color 0.2s, box-shadow 0.2s;
         }
-        input:focus { outline: none; border-color: #A7C080; box-shadow: 0 0 0 2px rgba(167, 192, 128, 0.2); }
+        input:focus { outline: none; border-color: #AAAAAA; box-shadow: 0 0 0 2px rgba(170, 170, 170, 0.25); }
         input:-webkit-autofill,
         input:-webkit-autofill:hover, 
         input:-webkit-autofill:focus, 
         input:-webkit-autofill:active {
-            -webkit-box-shadow: 0 0 0 1000px #1E2326 inset !important;
-            -webkit-text-fill-color: #D3C6AA !important;
-            caret-color: #D3C6AA !important;
+            -webkit-box-shadow: 0 0 0 1000px #151515 inset !important;
+            -webkit-text-fill-color: #E0E0E0 !important;
+            caret-color: #E0E0E0 !important;
             transition: background-color 50000s ease-in-out 0s;
         }
         button {
             width: 100%; min-height: 46px;
-            background: #A7C080; color: #1E2326; border: none;
+            background: #AAAAAA; color: #111111; border: none;
             border-radius: 8px; padding: 0.875rem 1.25rem;
             font-size: 0.975rem; font-family: inherit; font-weight: 600; cursor: pointer;
             margin-top: 0.5rem;
             transition: background-color 0.15s, transform 0.1s;
         }
-        button:hover { background: #B8D191; }
+        button:hover { background: #CCCCCC; }
         button:active { transform: scale(0.98); }
+
+        /* Changelog Side Panel */
+        .changelog-card {
+            background: #191919;
+            border: 1px solid #3C3C3C;
+            border-radius: 14px;
+            padding: 2.25rem 1.75rem;
+            box-shadow: 0 16px 32px rgba(0,0,0,0.4);
+            flex: 1;
+            min-width: 320px;
+            display: flex;
+            flex-direction: column;
+        }
+        .changelog-header {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-bottom: 1.25rem;
+            padding-bottom: 0.875rem;
+            border-bottom: 1px solid #3C3C3C;
+        }
+        .changelog-icon {
+            font-size: 1.25rem;
+        }
+        .changelog-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #E0E0E0;
+        }
+        .changelog-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1.15rem;
+            max-height: 360px;
+            overflow-y: auto;
+            padding-right: 6px;
+        }
+        .changelog-list::-webkit-scrollbar {
+            width: 5px;
+        }
+        .changelog-list::-webkit-scrollbar-thumb {
+            background: #3C3C3C;
+            border-radius: 3px;
+        }
+        .changelog-item {
+            border-left: 2px solid #AAAAAA;
+            padding-left: 0.875rem;
+        }
+        .changelog-date {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #AAAAAA;
+            margin-bottom: 0.25rem;
+        }
+        .changelog-desc {
+            font-size: 0.85rem;
+            color: #828282;
+            line-height: 1.45;
+        }
     </style>
 </head>
 <body>
-    <form class="card" method="POST" action="/login" autocomplete="on">
-        <div class="logo">ПС</div>
-        <h1>Помощник секретаря</h1>
-        <p class="subtitle">Войдите, чтобы продолжить</p>
-        __ERROR__
-        <label>
-            Имя пользователя
-            <input type="text" name="username" required autocomplete="username" autofocus
-                   autocapitalize="off" autocorrect="off" spellcheck="false">
-        </label>
-        <label>
-            Пароль
-            <input type="password" name="password" required autocomplete="current-password">
-        </label>
-        <button type="submit">Войти</button>
-    </form>
+    <div class="login-wrapper">
+        <form class="card" method="POST" action="/login" autocomplete="on">
+            <div class="logo">ПС</div>
+            <h1>Помощник секретаря</h1>
+            <p class="subtitle">Войдите, чтобы продолжить</p>
+            __ERROR__
+            <label>
+                Имя пользователя
+                <input type="text" name="username" required autocomplete="username" autofocus
+                       autocapitalize="off" autocorrect="off" spellcheck="false">
+            </label>
+            <label>
+                Пароль
+                <input type="password" name="password" required autocomplete="current-password">
+            </label>
+            <button type="submit">Войти</button>
+        </form>
+
+        <div class="changelog-card">
+            <div class="changelog-header">
+                <div class="changelog-title">История обновлений</div>
+            </div>
+
+            <div class="changelog-list">
+                <div class="changelog-item">
+                    <div class="changelog-date">07 августа 2026</div>
+                    <div class="changelog-desc">Умная фоновая очередь файлов, расчёт сэкономленного времени и нативная монохромная тема Noctalia.</div>
+                </div>
+                <div class="changelog-item">
+                    <div class="changelog-date">06 августа 2026</div>
+                    <div class="changelog-desc">Переход на DeepSeek Flash / GPT-4o-mini, ускорение генерации в 2.5 раза и таймер ETA.</div>
+                </div>
+                <div class="changelog-item">
+                    <div class="changelog-date">05 августа 2026</div>
+                    <div class="changelog-desc">Автоматическое исправление ASR оговорок распознавания редких судебных фамилий.</div>
+                </div>
+                <div class="changelog-item">
+                    <div class="changelog-date">04 августа 2026</div>
+                    <div class="changelog-desc">Анализ 58 эталонных судебных протоколов и нативная вёрстка Word (.docx) по стандартам ГОСТ.</div>
+                </div>
+                <div class="changelog-item">
+                    <div class="changelog-date">03 июля 2026</div>
+                    <div class="changelog-desc">Точный режим дословного протоколирования («Анти-сокращение») и поддержка 16 000 токенов.</div>
+                </div>
+                <div class="changelog-item">
+                    <div class="changelog-date">02 июля 2026</div>
+                    <div class="changelog-desc">Авто-разбор фамилий из названий файлов (`[Фамилия]_[Дата]_протокол.docx`) и пакетный drag-and-drop.</div>
+                </div>
+                <div class="changelog-item">
+                    <div class="changelog-date">01 июля 2026</div>
+                    <div class="changelog-desc">Интеграция AssemblyAI Speech Models с динамическим бустом судебной терминологии.</div>
+                </div>
+                <div class="changelog-item">
+                    <div class="changelog-date">02 июля 2026</div>
+                    <div class="changelog-desc">Унификация интерфейса под строгую монохромную тему и внедрение векторных иконок.</div>
+                </div>
+                <div class="changelog-item">
+                    <div class="changelog-date">02 июля 2026</div>
+                    <div class="changelog-desc">Первый релиз архитектуры Помощника Секретаря на базе FastAPI, SQLite и локальной ИИ-обработки.</div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>"""
 
@@ -204,7 +339,8 @@ def _login_page(error: str = "") -> HTMLResponse:
 
 async def login_page_handler(request: Request):
     token = request.cookies.get(SESSION_COOKIE)
-    if AUTH_USERNAME and verify_session_token(token) == AUTH_USERNAME:
+    user = verify_session_token(token)
+    if user and user in USERS:
         return RedirectResponse(url="/", status_code=303)
     return _login_page()
 
@@ -213,16 +349,12 @@ async def login_submit_handler(
     username: str,
     password: str,
 ):
-    if not (AUTH_USERNAME and AUTH_PASSWORD):
-        return RedirectResponse(url="/", status_code=303)
-
-    ok_user = secrets.compare_digest(username, AUTH_USERNAME)
-    ok_pass = secrets.compare_digest(password, AUTH_PASSWORD)
-    if not (ok_user and ok_pass):
-        log.warning(f"Failed login: username={username!r}")
+    clean_user = (username or "").strip()
+    if not verify_user_credentials(clean_user, password):
+        log.warning(f"Failed login: username={clean_user!r}")
         return _login_page(error="Неверное имя пользователя или пароль")
 
-    token = make_session_token(AUTH_USERNAME)
+    token = make_session_token(clean_user)
     resp = RedirectResponse(url="/", status_code=303)
     resp.set_cookie(
         SESSION_COOKIE,
@@ -233,7 +365,7 @@ async def login_submit_handler(
         samesite="lax",
         path="/",
     )
-    log.info(f"Login successful for {username!r}")
+    log.info(f"Login successful for {clean_user!r}")
     return resp
 
 

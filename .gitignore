@@ -16,11 +16,23 @@ backend/logs/
 *.db
 *.db-journal
 
-# Local reference docs and temporary scratch files
+# Local reference docs, private prompts, and temporary scratch files
 references/
 done-transcribe/
 scratch/
 *.docx
 *.doc
+*.m4a
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.aac
+.pytest_cache/
+
+# Private prompt (keep example template in git)
+prompts/system-protocol.md
+!prompts/system-protocol.md.example
+
 
 

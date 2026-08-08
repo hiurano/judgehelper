@@ -2,12 +2,6 @@
 
 const BACKEND = window.location.origin;
 
-// 401 from a protected endpoint = session expired.
-const _origFetch = window.fetch.bind(window);
-window.fetch = async function (...args) {
-    return await _origFetch(...args);
-};
-
 const $ = (id) => document.getElementById(id);
 
 // =========================================================================
@@ -35,24 +29,16 @@ function cleanSurname(name) {
 }
 
 function makeFilename(entry) {
-    const meta = entry.metadata || {};
-    const parts = [];
-    
-    const defendant = (meta.defendant || '').trim().split(' ')[0];
-    if (defendant) {
-        parts.push(defendant.replace(/[\\/:*?"<>|]/g, '_'));
-    } else {
-        parts.push('Без_имени');
+    let name = '';
+    if (entry.filename) {
+        name = entry.filename.replace(/\.[^/.]+$/, '').trim();
+    } else if (entry.metadata && entry.metadata.defendant) {
+        name = entry.metadata.defendant.trim();
     }
-    
-    const dateObj = new Date(entry.timestamp || Date.now());
-    const yyyy = dateObj.getFullYear();
-    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const dd = String(dateObj.getDate()).padStart(2, '0');
-    parts.push(`${yyyy}-${mm}-${dd}`);
-    
-    parts.push('протокол');
-    return parts.join('_') + '.docx';
+    if (!name) name = 'Протокол';
+    name = name.charAt(0).toUpperCase() + name.slice(1);
+    name = name.replace(/[\\/:*?"<>|]/g, '_');
+    return name + '.docx';
 }
 
 function formatHMS(s) {
@@ -110,8 +96,8 @@ function addFilesToQueue(files) {
 }
 
 function checkQueueScheduler() {
-    const active = queue.some((q) => q.status === 'uploading' || q.status === 'processing');
-    if (active) return;
+    const uploadingCount = queue.filter((q) => q.status === 'uploading').length;
+    if (uploadingCount >= 2) return;
     const next = queue.find((q) => q.status === 'queued');
     if (next) {
         processQueueItem(next);
@@ -130,6 +116,7 @@ async function processQueueItem(item) {
         item.phase = 'uploading_to_aai';
         item.pollStart = Date.now();
         renderQueue();
+        checkQueueScheduler();
         pollQueueItem(item);
     } catch (err) {
         if (err && err.code === 'AUTH') {
@@ -191,6 +178,8 @@ function pollQueueItem(item) {
                 renderQueue();
                 checkQueueScheduler();
                 releaseWakeLockIfDone();
+                notifyJobDone();
+                loadHistoryJobs();
             } else if (data.status === 'error') {
                 if (item.pollTimer) clearInterval(item.pollTimer);
                 item.status = 'error';
@@ -483,7 +472,7 @@ function renderQueueItem(item) {
     if (item.status === 'staged' || item.status === 'error' || item.status === 'auth_required') {
         const rmBtn = document.createElement('button');
         rmBtn.className = 'queue-remove-btn';
-        rmBtn.textContent = '✕';
+        rmBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
         rmBtn.title = 'Удалить';
         rmBtn.addEventListener('click', () => {
             queue = queue.filter((q) => q.key !== item.key);
@@ -625,8 +614,6 @@ function updateProcessingItems() {
 
 // Update processing timers efficiently without rebuilding DOM tree
 setInterval(() => {
-    const editing = document.activeElement && document.activeElement.tagName === 'INPUT';
-    if (editing) return;
     if (queue.some((q) => q.status === 'processing' || q.status === 'uploading')) {
         updateProcessingItems();
     }
@@ -638,7 +625,20 @@ setInterval(() => {
 const fileInput = $('file-input');
 const dropZone  = $('drop-zone');
 
-if (dropZone) dropZone.addEventListener('click', () => fileInput && fileInput.click());
+if (dropZone) {
+    dropZone.addEventListener('click', () => fileInput && fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+    });
+    dropZone.addEventListener('drop', () => {
+        dropZone.classList.remove('dragover');
+    });
+}
 const pickBtn = $('pick-btn');
 if (pickBtn) pickBtn.addEventListener('click', () => fileInput && fileInput.click());
 const addMoreBtn = $('add-more-btn');
@@ -710,10 +710,234 @@ function downloadTxt(text, filename) {
     URL.revokeObjectURL(url);
 }
 
+// =========================================================================
+// Completion Notifications (KISS Sound & Tab Title)
+// =========================================================================
+let originalTitle = document.title || 'Помощник секретаря';
+
+function playCompletionChime() {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5 note
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5 note
+
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start();
+        osc.stop(ctx.currentTime + 0.45);
+    } catch (e) {
+        // Ignore autoplay policy restrictions
+    }
+}
+
+function notifyJobDone() {
+    playCompletionChime();
+    const doneCnt = queue.filter((q) => q.status === 'done').length;
+    if (document.hidden && doneCnt > 0) {
+        document.title = `🔔 (${doneCnt}) Готово! — ${originalTitle}`;
+    }
+}
+
+// =========================================================================
+// History & Auto-Resume Persistence
+// =========================================================================
+let historyJobs = [];
+
+async function loadHistoryJobs() {
+    try {
+        const resp = await fetch(`${BACKEND}/jobs`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const allJobs = data.jobs || [];
+        
+        historyJobs = allJobs.filter((j) => j.status === 'done');
+        renderHistory();
+
+        // Auto-resume active/processing jobs upon page load or reload
+        const activeRemote = allJobs.filter((j) => j.status === 'processing');
+        let queueChanged = false;
+        for (const remote of activeRemote) {
+            const exists = queue.some((q) => q.jobId === remote.id || q.key === remote.id);
+            if (!exists) {
+                const item = {
+                    key: remote.id,
+                    jobId: remote.id,
+                    filename: remote.filename || 'Аудиозапись',
+                    sizeMB: '—',
+                    metadata: remote.metadata || {},
+                    status: 'processing',
+                    phase: remote.phase || 'processing',
+                    created_at: remote.created_at,
+                    progress: 50,
+                    pollStart: Date.now()
+                };
+                queue.push(item);
+                pollQueueItem(item);
+                queueChanged = true;
+            }
+        }
+        if (queueChanged) {
+            showCard('queue-card');
+            renderQueue();
+            acquireWakeLock();
+        }
+    } catch (e) {
+        console.warn('Failed to load history jobs:', e);
+    }
+}
+
+function renderHistory() {
+    const container = $('history-list');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    if (!historyJobs || historyJobs.length === 0) {
+        container.innerHTML = '<div class="history-empty">Пока нет готовых протоколов</div>';
+        return;
+    }
+
+    historyJobs.forEach((job) => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'history-item';
+        
+        const contentEl = document.createElement('div');
+        contentEl.className = 'history-item-content';
+
+        const titleEl = document.createElement('div');
+        titleEl.className = 'history-item-title';
+        const nameText = makeFilename(job);
+        titleEl.textContent = nameText;
+
+        const metaEl = document.createElement('div');
+        metaEl.className = 'history-item-meta';
+        const dateStr = job.updated_at
+            ? new Date(job.updated_at * 1000).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+            : '';
+        const durStr = job.duration_min ? `${job.duration_min} мин` : '';
+        metaEl.textContent = [durStr, dateStr].filter(Boolean).join(' · ');
+
+        contentEl.appendChild(titleEl);
+        contentEl.appendChild(metaEl);
+
+        const dlBtn = document.createElement('button');
+        dlBtn.className = 'history-dl-btn';
+        dlBtn.title = `Скачать ${nameText}`;
+        dlBtn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>`;
+        
+        dlBtn.addEventListener('click', async () => {
+            await downloadDocx(job.draft, nameText);
+        });
+
+        itemEl.appendChild(contentEl);
+        itemEl.appendChild(dlBtn);
+        container.appendChild(itemEl);
+    });
+}
+
+// =========================================================================
+// Profile & Dropdown Management
+// =========================================================================
+async function fetchUserProfile() {
+    try {
+        const resp = await fetch(`${BACKEND}/api/me`);
+        if (!resp.ok) return;
+        const user = await resp.json();
+
+        const name = user.display_name || user.username || 'Пользователь';
+        const initial = name.charAt(0).toUpperCase();
+
+        const btnEl = $('avatar-btn');
+        const nameEl = $('dropdown-user-name');
+        const planEl = $('dropdown-user-plan');
+        const statProto = $('dropdown-stat-protocols');
+        const statSavedShort = $('dropdown-stat-saved-short');
+        const bannerSaved = $('dropdown-saved-banner');
+
+        if (btnEl) btnEl.textContent = initial;
+        if (nameEl) nameEl.textContent = name;
+        if (planEl) planEl.textContent = `${user.plan || 'Персональный'} доступ`;
+        if (statProto) statProto.textContent = user.total_protocols || 0;
+
+        const totalMin = user.total_duration_min || 0;
+        const savedMinTotal = Math.round(totalMin * 3.5);
+
+        let shortStr = '0 мин';
+        let bannerStr = '⚡ Готов экономить ваше время';
+
+        if (savedMinTotal > 0) {
+            if (savedMinTotal < 60) {
+                shortStr = `${savedMinTotal} мин`;
+                bannerStr = `⚡ Сберегли ${savedMinTotal} минут вашей работы`;
+            } else {
+                const h = Math.floor(savedMinTotal / 60);
+                const m = savedMinTotal % 60;
+                const decimalH = (savedMinTotal / 60).toFixed(1);
+                shortStr = `~${decimalH} ч`;
+                if (m > 0) {
+                    bannerStr = `⚡ Сберегли ${h} ч ${m} мин вашей работы`;
+                } else {
+                    bannerStr = `⚡ Сберегли ${h} ч вашей работы`;
+                }
+            }
+        }
+
+        if (statSavedShort) statSavedShort.textContent = shortStr;
+        if (bannerSaved) bannerSaved.textContent = bannerStr;
+    } catch (e) {
+        console.warn('Failed to fetch user profile:', e);
+    }
+}
+
+function initProfileDropdown() {
+    const btn = $('avatar-btn');
+    const dropdown = $('profile-dropdown');
+
+    if (btn && dropdown) {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isHidden = dropdown.hasAttribute('hidden');
+            if (isHidden) {
+                dropdown.removeAttribute('hidden');
+                fetchUserProfile();
+            } else {
+                dropdown.setAttribute('hidden', '');
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!dropdown.contains(e.target) && e.target !== btn) {
+                dropdown.setAttribute('hidden', '');
+            }
+        });
+    }
+}
+
+// Initial load on page startup
+loadHistoryJobs();
+fetchUserProfile();
+initProfileDropdown();
+
 // Re-check jobs immediately on tab activation / unlock / online
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
+        document.title = originalTitle;
         acquireWakeLock();
+        loadHistoryJobs();
+        fetchUserProfile();
         queue.forEach((item) => {
             if (item.status === 'processing' && typeof item.forceCheck === 'function') {
                 item.forceCheck();
@@ -723,6 +947,8 @@ document.addEventListener('visibilitychange', () => {
 });
 
 window.addEventListener('online', () => {
+    loadHistoryJobs();
+    fetchUserProfile();
     queue.forEach((item) => {
         if (item.status === 'processing' && typeof item.forceCheck === 'function') {
             item.forceCheck();

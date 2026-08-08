@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -7,7 +8,7 @@
 
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#232A2E">
+    <meta name="theme-color" content="#161616">
 
     <!-- iOS-specific -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -21,46 +22,99 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="/static/style.css?v=10">
+    <link rel="stylesheet" href="/static/style.css?v=28">
 </head>
+
 <body>
-<div id="global-dropzone">
-    <h2>Бросайте файлы сюда</h2>
-</div>
-<div class="container">
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;margin-bottom:2rem">
-        <div style="min-width:0;flex:1">
-            <h1>Помощник секретаря</h1>
+    <div id="global-dropzone">
+        <h2>Бросайте файлы сюда</h2>
+    </div>
+    <div class="container">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;margin-bottom:2rem">
+            <div style="min-width:0;flex:1">
+                <h1 style="margin:0">Помощник секретаря</h1>
+            </div>
+            <div style="display:flex;gap:0.5rem;flex-shrink:0;position:relative;align-items:center">
+                <button class="avatar-circle-btn" id="avatar-btn" title="Профиль аккаунта">E</button>
+
+                <div class="profile-dropdown" id="profile-dropdown" hidden>
+                    <div class="dropdown-header">
+                        <div class="dropdown-user-info">
+                            <div class="dropdown-name" id="dropdown-user-name">Elena</div>
+                            <div class="dropdown-plan" id="dropdown-user-plan">Персональный доступ</div>
+                        </div>
+                    </div>
+
+                    <div class="dropdown-stats-grid">
+                        <div class="stat-card">
+                            <span class="stat-num" id="dropdown-stat-protocols">0</span>
+                            <span class="stat-lbl">Протоколов</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-num" id="dropdown-stat-saved-short">0 мин</span>
+                            <span class="stat-lbl">Сэкономлено</span>
+                        </div>
+                    </div>
+
+                    <!-- Preserved for JS compatibility -->
+                    <div id="dropdown-saved-banner" style="display:none !important"></div>
+
+                    <div class="dropdown-divider"></div>
+
+                    <a href="/logout" class="dropdown-logout-btn">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                            <polyline points="16 17 21 12 16 7"></polyline>
+                            <line x1="21" y1="12" x2="9" y2="12"></line>
+                        </svg>
+                        <span>Выйти из аккаунта</span>
+                    </a>
+                </div>
+            </div>
         </div>
-        <div style="display:flex;gap:0.5rem;flex-shrink:0;position:relative;align-items:center">
-            <a href="/logout" id="logout-link">Выйти</a>
+
+        <div class="main-grid">
+            <!-- LEFT COLUMN: Upload & Queue -->
+            <div class="main-left">
+                <!-- IDLE: pick file(s) -->
+                <div class="card" id="upload-card">
+                    <div id="drop-zone">
+                        <p>Перетащите файлы сюда</p>
+                        <p class="hint">mp3 · wav · m4a · mp4 · ogg · webm</p>
+                        <input type="file" id="file-input" accept="audio/*,video/mp4,.m4a,.webm" multiple>
+                    </div>
+                    <div class="row">
+                        <button id="pick-btn" class="secondary big">Выбрать файл(ы)</button>
+                    </div>
+                </div>
+
+                <!-- QUEUE -->
+                <div class="card" id="queue-card" hidden>
+                    <h2 id="queue-title">Обработка</h2>
+                    <div id="queue-list"></div>
+                    <div style="margin-top: 1rem;">
+                        <button id="add-more-btn" class="secondary" style="width: 100%;">+ Добавить ещё файл</button>
+                    </div>
+                    <div id="staged-bar-container" style="margin-top: 1.25rem;"></div>
+                </div>
+            </div>
+
+            <!-- RIGHT COLUMN: Ready Protocols History -->
+            <div class="main-right">
+                <div class="card" id="history-card">
+                    <h2>Готовые протоколы</h2>
+                    <div id="history-list">
+                        <div class="history-empty" id="history-empty">Пока нет готовых протоколов</div>
+                    </div>
+                </div>
+            </div>
         </div>
+
+
+
     </div>
 
-    <!-- IDLE: pick file(s) -->
-    <div class="card" id="upload-card">
-        <div id="drop-zone">
-            <p>Перетащите файлы сюда</p>
-            <p class="hint">mp3 · wav · m4a · mp4 · ogg · webm</p>
-            <input type="file" id="file-input" accept="audio/*,video/mp4,.m4a,.webm" multiple>
-        </div>
-        <div class="row">
-            <button id="pick-btn" class="secondary big">Выбрать файл(ы)</button>
-        </div>
-    </div>
-
-    <!-- QUEUE -->
-    <div class="card" id="queue-card" hidden>
-        <h2 id="queue-title">Обработка</h2>
-        <div id="queue-list"></div>
-        <div style="margin-top: 1rem;">
-            <button id="add-more-btn" class="secondary" style="width: 100%;">+ Добавить ещё файл</button>
-        </div>
-        <div id="staged-bar-container" style="margin-top: 1.25rem;"></div>
-    </div>
-
-</div>
-
-<script src="/static/app.js?v=14"></script>
+    <script src="/static/app.js?v=25"></script>
 </body>
+
 </html>

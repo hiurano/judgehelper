@@ -95,18 +95,24 @@ async def submit_to_assemblyai(temp_id: str, audio: bytes, filename: str):
         now = int(time.time())
         existing = jobs.get(temp_id, {})
         metadata = existing.get("metadata", {})
+        user_id = existing.get("user_id", "elena")
+        filename = existing.get("filename", "")
+
         existing["real_job_id"] = transcript_id
         existing["phase"] = "transcribing"
         existing["aai_started_at"] = now
         jobs[temp_id] = existing
+
         jobs[transcript_id] = {
             "status": "processing",
             "phase": "transcribing",
             "metadata": metadata,
+            "filename": filename,
+            "user_id": user_id,
             "created_at": existing.get("created_at", now),
             "aai_started_at": now,
         }
-        log.info(f"[{temp_id}] AssemblyAI transcript_id={transcript_id}")
+        log.info(f"[{temp_id}] AssemblyAI transcript_id={transcript_id} (user: {user_id})")
     except Exception as e:
         log.exception(f"[{temp_id}] background submit to AssemblyAI failed")
         existing = jobs.get(temp_id, {})
@@ -114,6 +120,8 @@ async def submit_to_assemblyai(temp_id: str, audio: bytes, filename: str):
             "status": "error",
             "error": f"Не удалось отправить файл на расшифровку: {e}",
             "metadata": existing.get("metadata", {}),
+            "user_id": existing.get("user_id", "elena"),
+            "filename": existing.get("filename", ""),
             "created_at": existing.get("created_at", int(time.time())),
         }
 
@@ -180,6 +188,20 @@ async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_p
     )
 
 
+def _sync_temp_jobs(transcript_id: str, final_status: str):
+    """Mark any temp_id job referencing transcript_id as complete/error so it stops lingering in active queue."""
+    try:
+        for job_id in list(jobs._conn().execute("SELECT id FROM jobs WHERE id LIKE 'tmp-%'").fetchall()):
+            tid = job_id[0]
+            item = jobs.get(tid)
+            if item and item.get("real_job_id") == transcript_id:
+                item["status"] = final_status
+                item["phase"] = None
+                jobs[tid] = item
+    except Exception:
+        pass
+
+
 async def process_transcript(transcript_id: str):
     """Process transcript from AssemblyAI, format text, and run LLM drafting."""
     lock = get_lock(transcript_id)
@@ -188,17 +210,20 @@ async def process_transcript(transcript_id: str):
         if existing.get("status") == "done":
             return
         metadata = existing.get("metadata", {})
+        user_id = existing.get("user_id", "elena")
+        filename = existing.get("filename", "")
         created_at = existing.get("created_at", int(time.time()))
         aai_started_at = existing.get("aai_started_at", created_at)
         audio_duration_sec = existing.get("audio_duration_sec")
         jobs[transcript_id] = {
             "status": "processing",
-            "phase": "drafting",
+            "phase": existing.get("phase", "processing"),
             "metadata": metadata,
+            "filename": filename,
+            "user_id": user_id,
             "created_at": created_at,
             "aai_started_at": aai_started_at,
             "audio_duration_sec": audio_duration_sec,
-            "drafting_started_at": int(time.time()),
         }
 
         try:
@@ -218,6 +243,8 @@ async def process_transcript(transcript_id: str):
                     "status": "processing",
                     "phase": "transcribing",
                     "metadata": metadata,
+                    "filename": filename,
+                    "user_id": user_id,
                     "created_at": created_at,
                     "aai_started_at": aai_started_at,
                     "audio_duration_sec": audio_duration_sec,
@@ -245,6 +272,8 @@ async def process_transcript(transcript_id: str):
                 "status": "processing",
                 "phase": "drafting",
                 "metadata": metadata,
+                "filename": filename,
+                "user_id": user_id,
                 "created_at": created_at,
                 "aai_started_at": aai_started_at,
                 "audio_duration_sec": audio_duration_sec,
@@ -272,15 +301,21 @@ async def process_transcript(transcript_id: str):
                 "duration_min": duration_min,
                 "model": used_model,
                 "metadata": metadata,
+                "filename": filename,
+                "user_id": user_id,
                 "created_at": created_at,
                 "aai_started_at": aai_started_at,
                 "audio_duration_sec": audio_duration_sec,
             }
+            _sync_temp_jobs(transcript_id, "done")
         except Exception as e:
             log.exception(f"Processing failed for {transcript_id}")
             jobs[transcript_id] = {
                 "status": "error",
                 "error": str(e),
                 "metadata": metadata,
+                "filename": filename,
+                "user_id": user_id,
                 "created_at": created_at,
             }
+            _sync_temp_jobs(transcript_id, "error")
