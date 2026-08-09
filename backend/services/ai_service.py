@@ -375,8 +375,8 @@ async def process_transcript(job_id: str):
                             prompt = (
                                 f"{meta_block}"
                                 f"Это ЧАСТЬ 1 из {len(chunks)} стенограммы судебного заседания.\n"
-                                "Сформируй вводную часть протокола (шапку, состав суда, наименование дела) и оформи начальные реплики в официальном стиле.\n"
-                                "ВАЖНО: В самом конце своего ответа ОБЯЗАТЕЛЬНО напиши строгий маппинг в формате: [КЛЮЧ РОЛЕЙ: Спикер А = Судья, Спикер B = Защитник и т.д.]\n\n"
+                                "ВАЖНО: В САМОЙ ПЕРВОЙ СТРОКЕ своего ответа ОБЯЗАТЕЛЬНО напиши строгий маппинг в формате: [КЛЮЧ РОЛЕЙ: Спикер А = Судья, Спикер B = Защитник]\n"
+                                "Со второй строки сформируй вводную часть протокола (шапку, состав суда, наименование дела) и оформи начальные реплики в официальном стиле.\n\n"
                                 f"{chunk_text}"
                             )
                         elif idx == len(chunks) - 1:
@@ -392,8 +392,8 @@ async def process_transcript(job_id: str):
                                 f"Это ЧАСТЬ {idx + 1} из {len(chunks)} стенограммы судебного заседания.\n"
                                 f"Контекст для сохранения ролей (конец предыдущей части):\n{last_context}\n\n"
                                 "ОБЯЗАТЕЛЬНО преобразуй ВСЕ метки [Спикер A/B/C/D]: в официальные судебные роли (Председательствующий:, Защитник:, Государственный обвинитель:, Подсудимый:, Свидетель:). Запрещено оставлять сырые метки [Спикер X]!\n"
-                                "Оформи содержательную часть реплик и действий участников процесса в официальном стиле.\n"
-                                "ВАЖНО: В самом конце своего ответа ОБЯЗАТЕЛЬНО напиши строгий маппинг в формате: [КЛЮЧ РОЛЕЙ: Спикер А = Судья, Спикер B = Защитник и т.д.]\n\n"
+                                "ВАЖНО: В САМОЙ ПЕРВОЙ СТРОКЕ своего ответа ОБЯЗАТЕЛЬНО напиши строгий маппинг в формате: [КЛЮЧ РОЛЕЙ: Спикер А = Судья, Спикер B = Защитник]\n"
+                                "Со второй строки оформи содержательную часть реплик и действий участников процесса в официальном стиле.\n\n"
                                 f"{chunk_text}"
                             )
 
@@ -401,14 +401,17 @@ async def process_transcript(job_id: str):
                             client, prompt, f"{job_id}-chunk-{idx + 1}"
                         )
 
-                        # Extract role key if present and remove from final draft text
-                        role_key_match = re.search(r'\[КЛЮЧ РОЛЕЙ:.*?\]', c_draft, re.DOTALL | re.IGNORECASE)
-                        if role_key_match:
-                            role_key = role_key_match.group(0)
-                            c_draft_clean = c_draft.replace(role_key, '').strip()
-                        else:
-                            role_key = ""
-                            c_draft_clean = c_draft
+                        # Robustly extract and remove role key lines
+                        role_lines = []
+                        clean_lines = []
+                        for line in c_draft.split('\n'):
+                            if 'КЛЮЧ РОЛЕЙ' in line.upper() or 'МАППИНГ' in line.upper():
+                                role_lines.append(line.strip())
+                            else:
+                                clean_lines.append(line)
+                                
+                        role_key = "\n".join(role_lines)
+                        c_draft_clean = "\n".join(clean_lines).strip()
 
                         drafts.append(c_draft_clean)
                         
