@@ -35,7 +35,7 @@ OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BASE_URL = os.environ.get("BASE_URL", "").rstrip("/")
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
-MODEL = os.environ.get("LLM_MODEL", "deepseek/deepseek-v4-flash-0731")
+MODEL = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
@@ -47,9 +47,9 @@ MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB
 # Models tried in order; first success wins.
 LLM_FALLBACK_CHAIN: list[str] = list(dict.fromkeys([
     MODEL,
-    "deepseek/deepseek-v4-flash-0731",
+    "openai/gpt-4o-mini",
     "google/gemini-2.5-flash",
-    "openai/gpt-4.1-nano",
+    "anthropic/claude-3-haiku",
 ]))
 
 SYSTEM_PROMPT_PATH = PROJECT_DIR / "prompts" / "system-protocol.md"
