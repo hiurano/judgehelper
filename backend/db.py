@@ -1,9 +1,11 @@
 """
-SQLite persistence module for Judge Helper jobs.
-Provides thread-safe dict-like storage for job states.
+SQLite persistence module for Judge Helper.
+Provides thread-safe storage for jobs and users.
 """
 import asyncio
+import hashlib
 import json
+import secrets
 import sqlite3
 import threading
 import time
@@ -11,7 +13,26 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
-from backend.config import DB_PATH, log
+from backend.config import DB_PATH, DEFAULT_USER, log
+
+
+# --- Password hashing utilities -------------------------------------------
+
+def hash_password(password: str) -> str:
+    """Create a salted SHA-256 hash for storage."""
+    salt = secrets.token_hex(16)
+    h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    return f"{salt}:{h}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Verify a password against a stored salted hash."""
+    try:
+        salt, expected = stored_hash.split(":", 1)
+    except ValueError:
+        return False
+    h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    return secrets.compare_digest(h, expected)
 
 
 class JobStore:
@@ -85,7 +106,7 @@ class JobStore:
     def __setitem__(self, job_id: str, data: dict):
         payload = json.dumps(data, ensure_ascii=False, default=str)
         ts = int(time.time())
-        user_id = data.get("user_id", "elena")
+        user_id = data.get("user_id", DEFAULT_USER)
         with self._lock, self._conn() as conn:
             conn.execute(
                 """INSERT INTO jobs (id, data, updated_at, user_id) VALUES (?, ?, ?, ?)
@@ -180,7 +201,7 @@ class JobStore:
                 continue
         return results
 
-    def get_user_stats(self, user_id: str = "elena") -> dict:
+    def get_user_stats(self, user_id: str = DEFAULT_USER) -> dict:
         with self._lock, self._conn() as conn:
             rows = conn.execute(
                 "SELECT data FROM jobs WHERE (user_id = ? OR user_id IS NULL)", (user_id,)
@@ -203,8 +224,109 @@ class JobStore:
         }
 
 
+# --- UserStore -------------------------------------------------------------
+
+class UserStore:
+    """Thread-safe SQLite store for user accounts with hashed passwords."""
+
+    def __init__(self, path: str):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(str(self.path)) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    display_name TEXT,
+                    created_at INTEGER NOT NULL
+                )"""
+            )
+
+    @contextmanager
+    def _conn(self):
+        conn = sqlite3.connect(str(self.path), timeout=10.0)
+        conn.execute("PRAGMA busy_timeout=5000")
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def create_user(self, username: str, password: str, display_name: str = "") -> bool:
+        """Create a new user. Returns False if username already exists."""
+        pw_hash = hash_password(password)
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "INSERT INTO users (username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
+                    (username, pw_hash, display_name or username.capitalize(), int(time.time())),
+                )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def verify(self, username: str, password: str) -> bool:
+        """Verify login credentials against stored hash."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT password_hash FROM users WHERE username = ?", (username,)
+            ).fetchone()
+        if not row:
+            return False
+        return verify_password(password, row[0])
+
+    def exists(self, username: str) -> bool:
+        """Check if a user account exists."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM users WHERE username = ?", (username,)
+            ).fetchone()
+        return row is not None
+
+    def delete_user(self, username: str) -> bool:
+        """Delete a user account."""
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM users WHERE username = ?", (username,))
+            return cur.rowcount > 0
+
+    def list_users(self) -> list[dict]:
+        """List all users (without passwords)."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT username, display_name, created_at FROM users"
+            ).fetchall()
+        return [{"username": r[0], "display_name": r[1], "created_at": r[2]} for r in rows]
+
+    def change_password(self, username: str, new_password: str) -> bool:
+        """Change a user's password."""
+        pw_hash = hash_password(new_password)
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET password_hash = ? WHERE username = ?",
+                (pw_hash, username),
+            )
+            return cur.rowcount > 0
+
+    def is_empty(self) -> bool:
+        """Check if the users table has no entries."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+        return row[0] == 0
+
+
 jobs = JobStore(DB_PATH)
 log.info(f"JobStore initialised at {DB_PATH} ({len(jobs)} existing entries)")
+
+user_store = UserStore(DB_PATH)
+log.info(f"UserStore initialised at {DB_PATH}")
 
 _locks_guard = threading.Lock()
 locks: dict[str, asyncio.Lock] = {}
