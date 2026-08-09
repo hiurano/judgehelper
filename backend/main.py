@@ -31,6 +31,7 @@ from backend.config import (
     ASSEMBLYAI_KEY,
     AUTH_PASSWORD,
     AUTH_USERNAME,
+    BACKEND_DIR,
     BASE_URL,
     DEFAULT_USER,
     JOB_TTL_DAYS,
@@ -186,28 +187,43 @@ async def upload(
             "Разрешены аудиофайлы: MP3, WAV, M4A, OGG, FLAC, AAC, WMA, WEBM.",
         )
 
-    # Pre-check Content-Length to reject oversized uploads before reading into RAM
+    # Pre-check Content-Length to reject oversized uploads before reading
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > MAX_UPLOAD_BYTES:
         raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
 
     user_id = getattr(request.state, "user", DEFAULT_USER)
-    audio = await file.read()
-    if not audio:
+    
+    job_id = "job-" + uuid.uuid4().hex[:24]
+    upload_dir = BACKEND_DIR / "data" / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    file_path = upload_dir / f"{job_id}{ext}"
+
+    # Stream the uploaded file directly to disk to avoid RAM OOM
+    size_bytes = 0
+    with open(file_path, "wb") as f:
+        while chunk := await file.read(1024 * 1024):  # 1 MB chunks
+            f.write(chunk)
+            size_bytes += len(chunk)
+            if size_bytes > MAX_UPLOAD_BYTES:
+                file_path.unlink()
+                raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
+
+    if size_bytes == 0:
+        file_path.unlink()
         raise HTTPException(400, "Загруженный файл пуст")
 
-    size_mb = len(audio) / 1024 / 1024
-    if size_mb > MAX_UPLOAD_BYTES / (1024 * 1024):
-        raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
+    size_mb = size_bytes / 1024 / 1024
 
     if not ASSEMBLYAI_KEY:
+        file_path.unlink()
         raise HTTPException(500, "AssemblyAI key not configured on server")
+        
     metadata = {
         "defendant": defendant.strip(),
     }
     log.info(f"Received {filename} ({size_mb:.1f} MB) for user {user_id}; defendant: {defendant}")
 
-    job_id = "job-" + uuid.uuid4().hex[:24]
     jobs[job_id] = {
         "status": "processing",
         "phase": "uploading_to_aai",
@@ -218,7 +234,7 @@ async def upload(
         "user_id": user_id,
     }
 
-    asyncio.create_task(submit_to_assemblyai(job_id, audio, filename or "audio"))
+    asyncio.create_task(submit_to_assemblyai(job_id, file_path, filename or "audio"))
     return {"job_id": job_id}
 
 
