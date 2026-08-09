@@ -14,9 +14,9 @@ from backend.config import (
     DEFAULT_USER,
     LLM_FALLBACK_CHAIN,
     OPENROUTER_KEY,
-    SYSTEM_PROMPT,
     WEBHOOK_SECRET,
     WORD_BOOST,
+    get_system_prompt,
     log,
 )
 from backend.db import get_lock, jobs, remove_lock
@@ -191,7 +191,7 @@ async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_p
     for model in LLM_FALLBACK_CHAIN:
         try:
             messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": get_system_prompt()},
                 {"role": "user", "content": user_msg},
             ]
             full_draft = ""
