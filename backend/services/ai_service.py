@@ -20,6 +20,8 @@ from backend.config import (
 from backend.db import get_lock, jobs
 from backend.services.text_cleaner import clean_transcript, format_metadata_block
 
+from fastapi import HTTPException
+
 _shared_client: Optional[httpx.AsyncClient] = None
 
 
@@ -30,6 +32,8 @@ async def async_retry(coro_fn, retries: int = 3, delay: float = 1.0, backoff: fl
     for attempt in range(1, retries + 1):
         try:
             return await coro_fn()
+        except HTTPException:
+            raise
         except Exception as exc:
             last_exc = exc
             if attempt == retries:

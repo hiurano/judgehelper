@@ -42,20 +42,18 @@ from backend.config import (
 )
 from backend.db import get_lock, jobs
 from backend.services.ai_service import (
+    async_retry,
     close_shared_client,
+    get_shared_client,
     process_transcript,
     recover_pending_jobs,
     submit_to_assemblyai,
 )
 from backend.services.docx_generator import render_docx
 
-http_client: Optional[httpx.AsyncClient] = None
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global http_client
-    http_client = httpx.AsyncClient(timeout=30.0)
     try:
         n = jobs.cleanup_old(JOB_TTL_DAYS)
         if n:
@@ -64,7 +62,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.exception("Startup cleanup/recovery failed (non-fatal)")
     yield
-    await http_client.aclose()
     await close_shared_client()
 
 
@@ -251,15 +248,19 @@ async def status(job_id: str):
     if not aai_transcript_id:
         return cached
 
-    client = http_client or httpx.AsyncClient(timeout=30.0)
-    tx_resp = await client.get(
-        f"https://api.assemblyai.com/v2/transcript/{aai_transcript_id}",
-        headers={"authorization": ASSEMBLYAI_KEY},
-    )
-    if tx_resp.status_code == 404:
-        raise HTTPException(404, "Job not found on AssemblyAI")
-    tx_resp.raise_for_status()
-    aai_body = tx_resp.json()
+    client = get_shared_client()
+
+    async def _fetch_status():
+        tx_resp = await client.get(
+            f"https://api.assemblyai.com/v2/transcript/{aai_transcript_id}",
+            headers={"authorization": ASSEMBLYAI_KEY},
+        )
+        if tx_resp.status_code == 404:
+            raise HTTPException(404, "Job not found on AssemblyAI")
+        tx_resp.raise_for_status()
+        return tx_resp.json()
+
+    aai_body = await async_retry(_fetch_status, retries=2, delay=0.5)
     aai_status = aai_body.get("status")
     aai_audio_duration = aai_body.get("audio_duration")
 
