@@ -829,29 +829,13 @@ function renderHistory() {
         contentEl.appendChild(titleEl);
         contentEl.appendChild(metaEl);
 
-        const actionsWrapper = document.createElement('div');
-        actionsWrapper.style.cssText = 'display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0;';
-
-        const dlBtn = document.createElement('button');
-        dlBtn.className = 'history-dl-btn';
-        dlBtn.title = `Скачать ${nameText}`;
-        dlBtn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-        </svg>`;
-        
-        dlBtn.addEventListener('click', async () => {
-            await downloadDocx(job.draft, nameText);
-        });
-
         const menuWrapper = document.createElement('div');
         menuWrapper.className = 'item-dropdown-wrapper';
 
         const dotsBtn = document.createElement('button');
-        dotsBtn.className = 'history-dl-btn';
+        dotsBtn.className = 'history-dots-btn';
         dotsBtn.title = 'Опции';
-        dotsBtn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        dotsBtn.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="1.5"></circle>
             <circle cx="12" cy="5" r="1.5"></circle>
             <circle cx="12" cy="19" r="1.5"></circle>
@@ -861,12 +845,27 @@ function renderHistory() {
         dropdownMenu.className = 'item-dropdown';
         dropdownMenu.hidden = true;
 
+        const dlItemBtn = document.createElement('button');
+        dlItemBtn.className = 'item-dropdown-btn';
+        dlItemBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg><span style="color:var(--text-main)">Скачать</span>`;
+        
+        dlItemBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            dropdownMenu.hidden = true;
+            await downloadDocx(job.draft, nameText);
+        });
+
         const delItemBtn = document.createElement('button');
         delItemBtn.className = 'item-dropdown-btn';
         delItemBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="3 6 5 6 21 6"></polyline>
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
         </svg><span>Удалить</span>`;
+        delItemBtn.style.color = '#E56B6B';
         
         delItemBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -893,15 +892,13 @@ function renderHistory() {
             dropdownMenu.hidden = !isHidden;
         });
 
+        dropdownMenu.appendChild(dlItemBtn);
         dropdownMenu.appendChild(delItemBtn);
         menuWrapper.appendChild(dotsBtn);
         menuWrapper.appendChild(dropdownMenu);
 
-        actionsWrapper.appendChild(dlBtn);
-        actionsWrapper.appendChild(menuWrapper);
-
         itemEl.appendChild(contentEl);
-        itemEl.appendChild(actionsWrapper);
+        itemEl.appendChild(menuWrapper);
         container.appendChild(itemEl);
     });
 }

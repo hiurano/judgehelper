@@ -662,6 +662,31 @@ button.history-dl-btn:hover {
     transform: translateY(-1px) !important;
 }
 
+button.history-dots-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 8px !important;
+    background-color: transparent !important;
+    border: none !important;
+    color: var(--text-muted) !important;
+    cursor: pointer !important;
+    flex: 0 0 32px !important;
+    box-shadow: none !important;
+    transition: all 0.2s ease !important;
+}
+
+button.history-dots-btn:hover {
+    background-color: rgba(170, 170, 170, 0.1) !important;
+    color: var(--text-main) !important;
+}
+
 /* Item Dropdown */
 .item-dropdown-wrapper {
     position: relative;
