@@ -165,9 +165,6 @@ async def upload(
     file: UploadFile = File(...),
     defendant: str = Form(""),
 ):
-    if not ASSEMBLYAI_KEY:
-        raise HTTPException(500, "AssemblyAI key not configured on server")
-
     allowed_exts = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma", ".webm", ".opus", ".mp4"}
     filename = file.filename or ""
     ext = Path(filename).suffix.lower()
@@ -185,6 +182,9 @@ async def upload(
     size_mb = len(audio) / 1024 / 1024
     if size_mb > 1024:
         raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
+
+    if not ASSEMBLYAI_KEY:
+        raise HTTPException(500, "AssemblyAI key not configured on server")
     metadata = {
         "defendant": defendant.strip(),
     }

@@ -10,7 +10,9 @@ client = TestClient(app)
 
 
 @pytest.fixture
-def auth_client():
+def auth_client(monkeypatch):
+    import backend.main as main_mod
+    monkeypatch.setattr(main_mod, "ASSEMBLYAI_KEY", "test-aai-key-12345")
     test_client = TestClient(app)
     test_client.cookies.set(SESSION_COOKIE, make_session_token("elena"))
     return test_client
