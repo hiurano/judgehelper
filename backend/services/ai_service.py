@@ -204,7 +204,7 @@ async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_p
                         raise RuntimeError(f"HTTP {llm_resp.status_code}: {llm_resp.text[:300]}")
                     return llm_resp
 
-                llm_resp = await async_retry(_do_llm_call, retries=2, delay=0.5)
+                llm_resp = await async_retry(_do_llm_call, retries=4, delay=1.5, backoff=2.0)
                 if llm_resp.status_code != 200:
                     last_error = f"{model}: HTTP {llm_resp.status_code}: {llm_resp.text[:300]}"
                     log.warning(f"[{log_prefix}] {last_error}; trying next model")
