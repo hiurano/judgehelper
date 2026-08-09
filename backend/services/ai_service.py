@@ -293,17 +293,13 @@ async def process_transcript(job_id: str):
             audio_duration_sec = existing.get("audio_duration_sec")
             aai_transcript_id = existing.get("aai_transcript_id") or job_id
 
-            jobs[job_id] = {
+            existing.update({
                 "status": "processing",
                 "phase": existing.get("phase", "processing"),
-                "metadata": metadata,
-                "filename": filename,
-                "user_id": user_id,
-                "created_at": created_at,
-                "aai_started_at": aai_started_at,
                 "aai_transcript_id": aai_transcript_id,
                 "audio_duration_sec": audio_duration_sec,
-            }
+            })
+            jobs[job_id] = existing
 
             try:
                 client = get_shared_client()
@@ -322,17 +318,12 @@ async def process_transcript(job_id: str):
 
                 if transcript.get("status") != "completed":
                     log.warning(f"process_transcript called for non-completed job {job_id} (AAI: {aai_transcript_id})")
-                    jobs[job_id] = {
+                    existing.update({
                         "status": "processing",
                         "phase": "transcribing",
-                        "metadata": metadata,
-                        "filename": filename,
-                        "user_id": user_id,
-                        "created_at": created_at,
-                        "aai_started_at": aai_started_at,
-                        "aai_transcript_id": aai_transcript_id,
                         "audio_duration_sec": audio_duration_sec,
-                    }
+                    })
+                    jobs[job_id] = existing
                     return
 
                 utterances = transcript.get("utterances") or []
@@ -352,18 +343,13 @@ async def process_transcript(job_id: str):
                 )
 
                 drafting_started_at = int(time.time())
-                jobs[job_id] = {
+                existing.update({
                     "status": "processing",
                     "phase": "drafting",
-                    "metadata": metadata,
-                    "filename": filename,
-                    "user_id": user_id,
-                    "created_at": created_at,
-                    "aai_started_at": aai_started_at,
-                    "aai_transcript_id": aai_transcript_id,
                     "audio_duration_sec": audio_duration_sec,
                     "drafting_started_at": drafting_started_at,
-                }
+                })
+                jobs[job_id] = existing
 
                 meta_block = format_metadata_block(metadata)
                 chunks = split_transcript_into_chunks(formatted, max_chunk_chars=12000)
@@ -384,6 +370,8 @@ async def process_transcript(job_id: str):
                     total_prompt_tokens = 0
                     total_completion_tokens = 0
 
+                    last_context = ""
+
                     for idx, chunk_text in enumerate(chunks):
                         if idx == 0:
                             prompt = (
@@ -395,6 +383,7 @@ async def process_transcript(job_id: str):
                         elif idx == len(chunks) - 1:
                             prompt = (
                                 f"Это ФИНАЛЬНАЯ ЧАСТЬ {idx + 1} из {len(chunks)} стенограммы судебного заседания.\n"
+                                f"Контекст для сохранения ролей (конец предыдущей части):\n{last_context}\n\n"
                                 "ОБЯЗАТЕЛЬНО преобразуй ВСЕ метки [Спикер A/B/C/D]: в официальные судебные роли (Председательствующий:, Защитник:, Государственный обвинитель:, Подсудимый:, Свидетель:). Запрещено оставлять сырые метки [Спикер X]!\n"
                                 "Продолжи дословное оформление реплик и судебных действий в официальном стиле, а в конце сформируй итоговый блок подписей (председательствующий судья, секретарь):\n\n"
                                 f"{chunk_text}"
@@ -402,6 +391,7 @@ async def process_transcript(job_id: str):
                         else:
                             prompt = (
                                 f"Это ЧАСТЬ {idx + 1} из {len(chunks)} стенограммы судебного заседания.\n"
+                                f"Контекст для сохранения ролей (конец предыдущей части):\n{last_context}\n\n"
                                 "ОБЯЗАТЕЛЬНО преобразуй ВСЕ метки [Спикер A/B/C/D]: в официальные судебные роли (Председательствующий:, Защитник:, Государственный обвинитель:, Подсудимый:, Свидетель:). Запрещено оставлять сырые метки [Спикер X]!\n"
                                 "Оформи содержательную часть реплик и действий участников процесса в официальном стиле (без повторного ввода новой шапки или подписей):\n\n"
                                 f"{chunk_text}"
@@ -411,6 +401,8 @@ async def process_transcript(job_id: str):
                             client, prompt, f"{job_id}-chunk-{idx + 1}"
                         )
                         drafts.append(c_draft)
+                        # Save last 1500 chars to maintain character identities across chunks
+                        last_context = c_draft[-1500:] if len(c_draft) > 1500 else c_draft
                         if not used_model:
                             used_model = c_model
                         total_prompt_tokens += (c_usage or {}).get("prompt_tokens", 0)
@@ -427,31 +419,21 @@ async def process_transcript(job_id: str):
                     f"chunks={len(chunks)}, in={usage.get('prompt_tokens')} out={usage.get('completion_tokens')})"
                 )
 
-                jobs[job_id] = {
+                existing.update({
                     "status": "done",
                     "draft": draft,
                     "transcript": formatted,
                     "duration_min": duration_min,
                     "model": used_model,
-                    "metadata": metadata,
-                    "filename": filename,
-                    "user_id": user_id,
-                    "created_at": created_at,
-                    "aai_started_at": aai_started_at,
-                    "aai_transcript_id": aai_transcript_id,
-                    "audio_duration_sec": audio_duration_sec,
-                }
+                })
+                jobs[job_id] = existing
             except Exception as e:
                 log.exception(f"Processing failed for {job_id}")
-                jobs[job_id] = {
+                existing.update({
                     "status": "error",
                     "error": str(e),
-                    "metadata": metadata,
-                    "filename": filename,
-                    "user_id": user_id,
-                    "created_at": created_at,
-                    "aai_transcript_id": aai_transcript_id,
-                }
+                })
+                jobs[job_id] = existing
     finally:
         remove_lock(job_id)
 
