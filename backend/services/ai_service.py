@@ -104,7 +104,6 @@ async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
             "audio_url": audio_url,
             "language_code": "ru",
             "speaker_labels": True,
-            "speakers_expected": 3,
             "speech_models": ["universal-2"],
             "punctuate": True,
             "format_text": True,
