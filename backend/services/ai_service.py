@@ -17,7 +17,7 @@ from backend.config import (
     WORD_BOOST,
     log,
 )
-from backend.db import get_lock, jobs
+from backend.db import get_lock, jobs, remove_lock
 from backend.services.text_cleaner import clean_transcript, format_metadata_block
 
 from fastapi import HTTPException
@@ -212,50 +212,111 @@ async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_p
 async def process_transcript(job_id: str):
     """Process transcript from AssemblyAI, format text, and run LLM drafting."""
     lock = get_lock(job_id)
-    async with lock:
-        existing = jobs.get(job_id, {})
-        if existing.get("status") == "done":
-            return
-        metadata = existing.get("metadata", {})
-        user_id = existing.get("user_id", "elena")
-        filename = existing.get("filename", "")
-        created_at = existing.get("created_at", int(time.time()))
-        aai_started_at = existing.get("aai_started_at", created_at)
-        audio_duration_sec = existing.get("audio_duration_sec")
-        aai_transcript_id = existing.get("aai_transcript_id") or job_id
+    try:
+        async with lock:
+            existing = jobs.get(job_id, {})
+            if existing.get("status") == "done":
+                return
+            metadata = existing.get("metadata", {})
+            user_id = existing.get("user_id", "elena")
+            filename = existing.get("filename", "")
+            created_at = existing.get("created_at", int(time.time()))
+            aai_started_at = existing.get("aai_started_at", created_at)
+            audio_duration_sec = existing.get("audio_duration_sec")
+            aai_transcript_id = existing.get("aai_transcript_id") or job_id
 
-        jobs[job_id] = {
-            "status": "processing",
-            "phase": existing.get("phase", "processing"),
-            "metadata": metadata,
-            "filename": filename,
-            "user_id": user_id,
-            "created_at": created_at,
-            "aai_started_at": aai_started_at,
-            "aai_transcript_id": aai_transcript_id,
-            "audio_duration_sec": audio_duration_sec,
-        }
+            jobs[job_id] = {
+                "status": "processing",
+                "phase": existing.get("phase", "processing"),
+                "metadata": metadata,
+                "filename": filename,
+                "user_id": user_id,
+                "created_at": created_at,
+                "aai_started_at": aai_started_at,
+                "aai_transcript_id": aai_transcript_id,
+                "audio_duration_sec": audio_duration_sec,
+            }
 
-        try:
-            client = get_shared_client()
+            try:
+                client = get_shared_client()
 
-            async def _do_fetch_transcript():
-                tx_resp = await client.get(
-                    f"https://api.assemblyai.com/v2/transcript/{aai_transcript_id}",
-                    headers={"authorization": ASSEMBLYAI_KEY},
+                async def _do_fetch_transcript():
+                    tx_resp = await client.get(
+                        f"https://api.assemblyai.com/v2/transcript/{aai_transcript_id}",
+                        headers={"authorization": ASSEMBLYAI_KEY},
+                    )
+                    tx_resp.raise_for_status()
+                    return tx_resp.json()
+
+                transcript = await async_retry(_do_fetch_transcript, retries=3, delay=1.0)
+
+                audio_duration_sec = transcript.get("audio_duration") or audio_duration_sec
+
+                if transcript.get("status") != "completed":
+                    log.warning(f"process_transcript called for non-completed job {job_id} (AAI: {aai_transcript_id})")
+                    jobs[job_id] = {
+                        "status": "processing",
+                        "phase": "transcribing",
+                        "metadata": metadata,
+                        "filename": filename,
+                        "user_id": user_id,
+                        "created_at": created_at,
+                        "aai_started_at": aai_started_at,
+                        "aai_transcript_id": aai_transcript_id,
+                        "audio_duration_sec": audio_duration_sec,
+                    }
+                    return
+
+                utterances = transcript.get("utterances") or []
+                if utterances:
+                    formatted = "\n\n".join(
+                        f"[Спикер {u['speaker']}]: {u['text']}" for u in utterances
+                    )
+                else:
+                    formatted = transcript.get("text", "")
+
+                formatted = clean_transcript(formatted)
+                duration_min = round((audio_duration_sec or 0) / 60, 1)
+
+                log.info(
+                    f"Transcript {job_id}: {duration_min} min, "
+                    f"{len(utterances)} utterances, {len(formatted)} chars. Calling LLM..."
                 )
-                tx_resp.raise_for_status()
-                return tx_resp.json()
 
-            transcript = await async_retry(_do_fetch_transcript, retries=3, delay=1.0)
-
-            audio_duration_sec = transcript.get("audio_duration") or audio_duration_sec
-
-            if transcript.get("status") != "completed":
-                log.warning(f"process_transcript called for non-completed job {job_id} (AAI: {aai_transcript_id})")
+                drafting_started_at = int(time.time())
                 jobs[job_id] = {
                     "status": "processing",
-                    "phase": "transcribing",
+                    "phase": "drafting",
+                    "metadata": metadata,
+                    "filename": filename,
+                    "user_id": user_id,
+                    "created_at": created_at,
+                    "aai_started_at": aai_started_at,
+                    "aai_transcript_id": aai_transcript_id,
+                    "audio_duration_sec": audio_duration_sec,
+                    "drafting_started_at": drafting_started_at,
+                }
+
+                meta_block = format_metadata_block(metadata)
+                user_msg = (
+                    f"{meta_block}"
+                    "Составь черновик протокола судебного заседания на основе "
+                    f"следующей размеченной стенограммы аудиозаписи:\n\n{formatted}"
+                )
+                draft, used_model, usage = await call_llm_with_fallback(
+                    client, user_msg, job_id
+                )
+                log.info(
+                    f"[{job_id}] Draft via {used_model} ({len(draft)} chars, "
+                    f"in={usage.get('prompt_tokens')} out={usage.get('completion_tokens')})"
+                )
+
+                jobs[job_id] = {
+                    "status": "done",
+                    "draft": draft,
+                    "transcript": formatted,
+                    "duration_min": duration_min,
+                    "model": used_model,
                     "metadata": metadata,
                     "filename": filename,
                     "user_id": user_id,
@@ -264,77 +325,19 @@ async def process_transcript(job_id: str):
                     "aai_transcript_id": aai_transcript_id,
                     "audio_duration_sec": audio_duration_sec,
                 }
-                return
-
-            utterances = transcript.get("utterances") or []
-            if utterances:
-                formatted = "\n\n".join(
-                    f"[Спикер {u['speaker']}]: {u['text']}" for u in utterances
-                )
-            else:
-                formatted = transcript.get("text", "")
-
-            formatted = clean_transcript(formatted)
-            duration_min = round((audio_duration_sec or 0) / 60, 1)
-
-            log.info(
-                f"Transcript {job_id}: {duration_min} min, "
-                f"{len(utterances)} utterances, {len(formatted)} chars. Calling LLM..."
-            )
-
-            drafting_started_at = int(time.time())
-            jobs[job_id] = {
-                "status": "processing",
-                "phase": "drafting",
-                "metadata": metadata,
-                "filename": filename,
-                "user_id": user_id,
-                "created_at": created_at,
-                "aai_started_at": aai_started_at,
-                "aai_transcript_id": aai_transcript_id,
-                "audio_duration_sec": audio_duration_sec,
-                "drafting_started_at": drafting_started_at,
-            }
-
-            meta_block = format_metadata_block(metadata)
-            user_msg = (
-                f"{meta_block}"
-                "Составь черновик протокола судебного заседания на основе "
-                f"следующей размеченной стенограммы аудиозаписи:\n\n{formatted}"
-            )
-            draft, used_model, usage = await call_llm_with_fallback(
-                client, user_msg, job_id
-            )
-            log.info(
-                f"[{job_id}] Draft via {used_model} ({len(draft)} chars, "
-                f"in={usage.get('prompt_tokens')} out={usage.get('completion_tokens')})"
-            )
-
-            jobs[job_id] = {
-                "status": "done",
-                "draft": draft,
-                "transcript": formatted,
-                "duration_min": duration_min,
-                "model": used_model,
-                "metadata": metadata,
-                "filename": filename,
-                "user_id": user_id,
-                "created_at": created_at,
-                "aai_started_at": aai_started_at,
-                "aai_transcript_id": aai_transcript_id,
-                "audio_duration_sec": audio_duration_sec,
-            }
-        except Exception as e:
-            log.exception(f"Processing failed for {job_id}")
-            jobs[job_id] = {
-                "status": "error",
-                "error": str(e),
-                "metadata": metadata,
-                "filename": filename,
-                "user_id": user_id,
-                "created_at": created_at,
-                "aai_transcript_id": aai_transcript_id,
-            }
+            except Exception as e:
+                log.exception(f"Processing failed for {job_id}")
+                jobs[job_id] = {
+                    "status": "error",
+                    "error": str(e),
+                    "metadata": metadata,
+                    "filename": filename,
+                    "user_id": user_id,
+                    "created_at": created_at,
+                    "aai_transcript_id": aai_transcript_id,
+                }
+    finally:
+        remove_lock(job_id)
 
 
 async def recover_pending_jobs():
