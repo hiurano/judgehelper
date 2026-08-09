@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from backend.config import (
     AUTH_PASSWORD,
     AUTH_USERNAME,
+    SECRET_KEY,
     WEBHOOK_SECRET,
     log,
 )
@@ -48,7 +49,7 @@ def verify_user_credentials(username: str, password: str) -> bool:
 
 
 def _session_secret() -> str:
-    return WEBHOOK_SECRET or "fallback-dev-secret-do-not-use-in-prod"
+    return SECRET_KEY or WEBHOOK_SECRET or "fallback-dev-secret-do-not-use-in-prod"
 
 
 def make_session_token(username: str) -> str:
@@ -317,11 +318,11 @@ LOGIN_HTML = """<!DOCTYPE html>
                     <div class="changelog-desc">Интеграция AssemblyAI Speech Models с динамическим бустом судебной терминологии.</div>
                 </div>
                 <div class="changelog-item">
-                    <div class="changelog-date">02 июля 2026</div>
+                    <div class="changelog-date">30 июня 2026</div>
                     <div class="changelog-desc">Унификация интерфейса под строгую монохромную тему и внедрение векторных иконок.</div>
                 </div>
                 <div class="changelog-item">
-                    <div class="changelog-date">02 июля 2026</div>
+                    <div class="changelog-date">29 июня 2026</div>
                     <div class="changelog-desc">Первый релиз архитектуры Помощника Секретаря на базе FastAPI, SQLite и локальной ИИ-обработки.</div>
                 </div>
             </div>

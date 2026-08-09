@@ -9,6 +9,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Optional
 
 from backend.config import DB_PATH, log
 
@@ -115,6 +116,44 @@ class JobStore:
 
         return deleted
 
+    def get_by_aai_id(self, key_or_aai_id: str) -> tuple[Optional[str], Optional[dict]]:
+        """Find job by primary job_id or embedded aai_transcript_id.
+        Returns (job_id, job_data) or (None, None)."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute("SELECT id, data FROM jobs WHERE id = ?", (key_or_aai_id,)).fetchone()
+            if row:
+                try:
+                    return row[0], json.loads(row[1])
+                except Exception:
+                    return None, None
+
+            rows = conn.execute("SELECT id, data FROM jobs WHERE data LIKE ?", (f'%"{key_or_aai_id}"%',)).fetchall()
+            for r_id, r_data in rows:
+                try:
+                    d = json.loads(r_data)
+                    if d.get("aai_transcript_id") == key_or_aai_id:
+                        return r_id, d
+                except Exception:
+                    continue
+        return None, None
+
+    def get_pending_jobs(self) -> list[dict]:
+        """Fetch all jobs currently in 'processing' status."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, data FROM jobs WHERE data LIKE '%\"status\": \"processing\"%'"
+            ).fetchall()
+        results = []
+        for job_id, data_str in rows:
+            try:
+                data = json.loads(data_str)
+                if data.get("status") == "processing":
+                    data["id"] = job_id
+                    results.append(data)
+            except Exception:
+                continue
+        return results
+
     def list_recent(self, user_id: str = None, limit: int = 30) -> list:
         with self._lock, self._conn() as conn:
             if user_id:
@@ -141,7 +180,7 @@ class JobStore:
     def get_user_stats(self, user_id: str = "elena") -> dict:
         with self._lock, self._conn() as conn:
             rows = conn.execute(
-                "SELECT data FROM jobs WHERE id NOT LIKE 'tmp-%' AND (user_id = ? OR user_id IS NULL)", (user_id,)
+                "SELECT data FROM jobs WHERE (user_id = ? OR user_id IS NULL)", (user_id,)
             ).fetchall()
         total_count = 0
         total_sec = 0.0

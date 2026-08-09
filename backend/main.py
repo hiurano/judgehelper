@@ -7,6 +7,7 @@ transcription (AssemblyAI), LLM drafting (OpenRouter), and DOCX generation.
 """
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 import time
 import urllib.parse
 import uuid
@@ -43,6 +44,7 @@ from backend.db import get_lock, jobs
 from backend.services.ai_service import (
     close_shared_client,
     process_transcript,
+    recover_pending_jobs,
     submit_to_assemblyai,
 )
 from backend.services.docx_generator import render_docx
@@ -58,8 +60,9 @@ async def lifespan(app: FastAPI):
         n = jobs.cleanup_old(JOB_TTL_DAYS)
         if n:
             log.info(f"Startup: pruned {n} job entries older than {JOB_TTL_DAYS} days")
+        await recover_pending_jobs()
     except Exception:
-        log.exception("Startup cleanup failed (non-fatal)")
+        log.exception("Startup cleanup/recovery failed (non-fatal)")
     yield
     await http_client.aclose()
     await close_shared_client()
@@ -165,27 +168,41 @@ async def upload(
     if not ASSEMBLYAI_KEY:
         raise HTTPException(500, "AssemblyAI key not configured on server")
 
+    allowed_exts = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma", ".webm", ".opus", ".mp4"}
+    filename = file.filename or ""
+    ext = Path(filename).suffix.lower()
+    if ext and ext not in allowed_exts:
+        raise HTTPException(
+            400,
+            f"Неподдерживаемый формат файла ({ext}). Разрешены аудиофайлы: MP3, WAV, M4A, OGG, FLAC, AAC, WMA, WEBM.",
+        )
+
     user_id = getattr(request.state, "user", "elena")
     audio = await file.read()
+    if not audio:
+        raise HTTPException(400, "Загруженный файл пуст")
+
     size_mb = len(audio) / 1024 / 1024
+    if size_mb > 1024:
+        raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
     metadata = {
         "defendant": defendant.strip(),
     }
-    log.info(f"Received {file.filename} ({size_mb:.1f} MB) for user {user_id}; defendant: {defendant}")
+    log.info(f"Received {filename} ({size_mb:.1f} MB) for user {user_id}; defendant: {defendant}")
 
-    temp_id = "tmp-" + uuid.uuid4().hex[:24]
-    jobs[temp_id] = {
+    job_id = "job-" + uuid.uuid4().hex[:24]
+    jobs[job_id] = {
         "status": "processing",
         "phase": "uploading_to_aai",
         "metadata": metadata,
         "size_mb": round(size_mb, 1),
-        "filename": file.filename or "",
+        "filename": filename,
         "created_at": int(time.time()),
         "user_id": user_id,
     }
 
-    asyncio.create_task(submit_to_assemblyai(temp_id, audio, file.filename or "audio"))
-    return {"job_id": temp_id}
+    asyncio.create_task(submit_to_assemblyai(job_id, audio, filename or "audio"))
+    return {"job_id": job_id}
 
 
 @app.post("/webhook/aai")
@@ -201,94 +218,85 @@ async def aai_webhook(payload: dict, x_webhook_secret: Optional[str] = Header(No
     if not transcript_id:
         return {"ok": False, "reason": "no transcript_id"}
 
+    job_id, existing = jobs.get_by_aai_id(transcript_id)
+    if not job_id or not existing:
+        log.warning(f"Webhook received for unknown transcript_id: {transcript_id}")
+        return {"ok": False, "reason": "job not found"}
+
     if status_val == "error":
-        existing = jobs.get(transcript_id, {})
         existing.update({"status": "error", "error": "AssemblyAI transcription failed"})
-        jobs[transcript_id] = existing
+        jobs[job_id] = existing
         return {"ok": True}
 
     if status_val != "completed":
         return {"ok": True}
 
-    asyncio.create_task(process_transcript(transcript_id))
+    asyncio.create_task(process_transcript(job_id))
     return {"ok": True}
 
 
 @app.get("/status/{job_id}")
 async def status(job_id: str):
-    cached = jobs.get(job_id)
+    found_id, cached = jobs.get_by_aai_id(job_id)
+    if found_id:
+        job_id = found_id
 
-    if job_id.startswith("tmp-") and cached:
-        if cached.get("status") == "error":
-            return cached
-        real_id = cached.get("real_job_id")
-        if not real_id:
-            return cached
-        real_cached = jobs.get(real_id)
-        if real_cached and real_cached.get("status") in ("done", "error"):
-            return real_cached
-        job_id = real_id
-        cached = real_cached
+    if not cached:
+        raise HTTPException(404, "Job not found")
 
-    if cached and cached.get("status") in ("done", "error"):
+    if cached.get("status") in ("done", "error"):
+        return cached
+
+    aai_transcript_id = cached.get("aai_transcript_id")
+    if not aai_transcript_id:
         return cached
 
     client = http_client or httpx.AsyncClient(timeout=30.0)
     tx_resp = await client.get(
-        f"https://api.assemblyai.com/v2/transcript/{job_id}",
+        f"https://api.assemblyai.com/v2/transcript/{aai_transcript_id}",
         headers={"authorization": ASSEMBLYAI_KEY},
     )
     if tx_resp.status_code == 404:
-        raise HTTPException(404, "Job not found")
+        raise HTTPException(404, "Job not found on AssemblyAI")
     tx_resp.raise_for_status()
     aai_body = tx_resp.json()
     aai_status = aai_body.get("status")
     aai_audio_duration = aai_body.get("audio_duration")
 
-    cached_now = jobs.get(job_id) or {}
-    if aai_audio_duration and not cached_now.get("audio_duration_sec"):
-        cached_now["audio_duration_sec"] = aai_audio_duration
-    if not cached_now.get("created_at"):
-        cached_now["created_at"] = int(time.time())
-    if not cached_now.get("aai_started_at"):
-        cached_now["aai_started_at"] = cached_now["created_at"]
+    if aai_audio_duration and not cached.get("audio_duration_sec"):
+        cached["audio_duration_sec"] = aai_audio_duration
 
     if aai_status == "error":
-        cached_now.update({"status": "error", "error": aai_body.get("error", "AssemblyAI error")})
-        jobs[job_id] = cached_now
-        return cached_now
+        cached.update({"status": "error", "error": aai_body.get("error", "AssemblyAI error")})
+        jobs[job_id] = cached
+        return cached
 
     if aai_status != "completed":
-        cached_now.update({"status": "processing", "phase": "transcribing", "aai_status": aai_status})
-        jobs[job_id] = cached_now
-        return cached_now
+        cached.update({"status": "processing", "phase": "transcribing", "aai_status": aai_status})
+        jobs[job_id] = cached
+        return cached
 
     lock = get_lock(job_id)
-    cached_now.update({
+    cached.update({
         "status": "processing",
         "phase": "drafting",
-        "drafting_started_at": cached_now.get("drafting_started_at") or int(time.time()),
+        "drafting_started_at": cached.get("drafting_started_at") or int(time.time()),
     })
-    jobs[job_id] = cached_now
+    jobs[job_id] = cached
     if not lock.locked():
         asyncio.create_task(process_transcript(job_id))
-    return cached_now
+    return cached
 
 
 @app.get("/jobs")
 async def list_jobs(request: Request):
     user_id = getattr(request.state, "user", "elena")
     recent = jobs.list_recent(user_id=user_id, limit=30)
-    seen_ids = set()
     cleaned = []
     for item in recent:
         job_id = item.get("id")
-        if not job_id or job_id in seen_ids:
+        if not job_id:
             continue
-        real_id = item.get("real_job_id")
-        if real_id and any(r.get("id") == real_id for r in recent):
-            continue
-        seen_ids.add(job_id)
         cleaned.append({
             "id": job_id,
             "status": item.get("status"),
@@ -323,7 +331,7 @@ async def render_docx_endpoint(payload: dict):
     text = payload.get("text", "")
     if not isinstance(text, str) or not text.strip():
         raise HTTPException(400, "text field is required and must be non-empty")
-    docx_bytes = render_docx(text)
+    docx_bytes = await asyncio.to_thread(render_docx, text)
     filename = payload.get("filename") or "protokol.docx"
     if not filename.endswith(".docx"):
         filename = f"{filename}.docx"

@@ -39,8 +39,8 @@ async def close_shared_client():
         _shared_client = None
 
 
-async def submit_to_assemblyai(temp_id: str, audio: bytes, filename: str):
-    """Background task: upload bytes to AssemblyAI and create a transcription job."""
+async def submit_to_assemblyai(job_id: str, audio: bytes, filename: str):
+    """Background task: upload bytes to AssemblyAI and update transcription job."""
     try:
         client = get_shared_client()
         up_resp = await client.post(
@@ -53,9 +53,9 @@ async def submit_to_assemblyai(temp_id: str, audio: bytes, filename: str):
                 f"AssemblyAI upload {up_resp.status_code}: {up_resp.text[:300]}"
             )
         audio_url = up_resp.json()["upload_url"]
-        log.info(f"[{temp_id}] Uploaded to AssemblyAI ({filename})")
+        log.info(f"[{job_id}] Uploaded to AssemblyAI ({filename})")
 
-        job_meta = jobs.get(temp_id, {}).get("metadata", {})
+        job_meta = jobs.get(job_id, {}).get("metadata", {})
         dynamic_boost = list(WORD_BOOST)
         if job_meta.get("defendant"):
             defendant_name = job_meta["defendant"]
@@ -90,40 +90,26 @@ async def submit_to_assemblyai(temp_id: str, audio: bytes, filename: str):
             raise RuntimeError(
                 f"AssemblyAI submit {submit_resp.status_code}: {submit_resp.text[:300]}"
             )
-        transcript_id = submit_resp.json()["id"]
+        aai_transcript_id = submit_resp.json()["id"]
 
         now = int(time.time())
-        existing = jobs.get(temp_id, {})
-        metadata = existing.get("metadata", {})
-        user_id = existing.get("user_id", "elena")
-        filename = existing.get("filename", "")
-
-        existing["real_job_id"] = transcript_id
-        existing["phase"] = "transcribing"
-        existing["aai_started_at"] = now
-        jobs[temp_id] = existing
-
-        jobs[transcript_id] = {
+        existing = jobs.get(job_id, {})
+        existing.update({
             "status": "processing",
             "phase": "transcribing",
-            "metadata": metadata,
-            "filename": filename,
-            "user_id": user_id,
-            "created_at": existing.get("created_at", now),
+            "aai_transcript_id": aai_transcript_id,
             "aai_started_at": now,
-        }
-        log.info(f"[{temp_id}] AssemblyAI transcript_id={transcript_id} (user: {user_id})")
+        })
+        jobs[job_id] = existing
+        log.info(f"[{job_id}] AssemblyAI aai_transcript_id={aai_transcript_id}")
     except Exception as e:
-        log.exception(f"[{temp_id}] background submit to AssemblyAI failed")
-        existing = jobs.get(temp_id, {})
-        jobs[temp_id] = {
+        log.exception(f"[{job_id}] background submit to AssemblyAI failed")
+        existing = jobs.get(job_id, {})
+        existing.update({
             "status": "error",
             "error": f"Не удалось отправить файл на расшифровку: {e}",
-            "metadata": existing.get("metadata", {}),
-            "user_id": existing.get("user_id", "elena"),
-            "filename": existing.get("filename", ""),
-            "created_at": existing.get("created_at", int(time.time())),
-        }
+        })
+        jobs[job_id] = existing
 
 
 async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_prefix: str):
@@ -188,25 +174,11 @@ async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_p
     )
 
 
-def _sync_temp_jobs(transcript_id: str, final_status: str):
-    """Mark any temp_id job referencing transcript_id as complete/error so it stops lingering in active queue."""
-    try:
-        for job_id in list(jobs._conn().execute("SELECT id FROM jobs WHERE id LIKE 'tmp-%'").fetchall()):
-            tid = job_id[0]
-            item = jobs.get(tid)
-            if item and item.get("real_job_id") == transcript_id:
-                item["status"] = final_status
-                item["phase"] = None
-                jobs[tid] = item
-    except Exception:
-        pass
-
-
-async def process_transcript(transcript_id: str):
+async def process_transcript(job_id: str):
     """Process transcript from AssemblyAI, format text, and run LLM drafting."""
-    lock = get_lock(transcript_id)
+    lock = get_lock(job_id)
     async with lock:
-        existing = jobs.get(transcript_id, {})
+        existing = jobs.get(job_id, {})
         if existing.get("status") == "done":
             return
         metadata = existing.get("metadata", {})
@@ -215,7 +187,9 @@ async def process_transcript(transcript_id: str):
         created_at = existing.get("created_at", int(time.time()))
         aai_started_at = existing.get("aai_started_at", created_at)
         audio_duration_sec = existing.get("audio_duration_sec")
-        jobs[transcript_id] = {
+        aai_transcript_id = existing.get("aai_transcript_id") or job_id
+
+        jobs[job_id] = {
             "status": "processing",
             "phase": existing.get("phase", "processing"),
             "metadata": metadata,
@@ -223,13 +197,14 @@ async def process_transcript(transcript_id: str):
             "user_id": user_id,
             "created_at": created_at,
             "aai_started_at": aai_started_at,
+            "aai_transcript_id": aai_transcript_id,
             "audio_duration_sec": audio_duration_sec,
         }
 
         try:
             client = get_shared_client()
             tx_resp = await client.get(
-                f"https://api.assemblyai.com/v2/transcript/{transcript_id}",
+                f"https://api.assemblyai.com/v2/transcript/{aai_transcript_id}",
                 headers={"authorization": ASSEMBLYAI_KEY},
             )
             tx_resp.raise_for_status()
@@ -238,8 +213,8 @@ async def process_transcript(transcript_id: str):
             audio_duration_sec = transcript.get("audio_duration") or audio_duration_sec
 
             if transcript.get("status") != "completed":
-                log.warning(f"process_transcript called for non-completed job {transcript_id}")
-                jobs[transcript_id] = {
+                log.warning(f"process_transcript called for non-completed job {job_id} (AAI: {aai_transcript_id})")
+                jobs[job_id] = {
                     "status": "processing",
                     "phase": "transcribing",
                     "metadata": metadata,
@@ -247,6 +222,7 @@ async def process_transcript(transcript_id: str):
                     "user_id": user_id,
                     "created_at": created_at,
                     "aai_started_at": aai_started_at,
+                    "aai_transcript_id": aai_transcript_id,
                     "audio_duration_sec": audio_duration_sec,
                 }
                 return
@@ -263,12 +239,12 @@ async def process_transcript(transcript_id: str):
             duration_min = round((audio_duration_sec or 0) / 60, 1)
 
             log.info(
-                f"Transcript {transcript_id}: {duration_min} min, "
+                f"Transcript {job_id}: {duration_min} min, "
                 f"{len(utterances)} utterances, {len(formatted)} chars. Calling LLM..."
             )
 
             drafting_started_at = int(time.time())
-            jobs[transcript_id] = {
+            jobs[job_id] = {
                 "status": "processing",
                 "phase": "drafting",
                 "metadata": metadata,
@@ -276,6 +252,7 @@ async def process_transcript(transcript_id: str):
                 "user_id": user_id,
                 "created_at": created_at,
                 "aai_started_at": aai_started_at,
+                "aai_transcript_id": aai_transcript_id,
                 "audio_duration_sec": audio_duration_sec,
                 "drafting_started_at": drafting_started_at,
             }
@@ -287,14 +264,14 @@ async def process_transcript(transcript_id: str):
                 f"следующей размеченной стенограммы аудиозаписи:\n\n{formatted}"
             )
             draft, used_model, usage = await call_llm_with_fallback(
-                client, user_msg, transcript_id
+                client, user_msg, job_id
             )
             log.info(
-                f"[{transcript_id}] Draft via {used_model} ({len(draft)} chars, "
+                f"[{job_id}] Draft via {used_model} ({len(draft)} chars, "
                 f"in={usage.get('prompt_tokens')} out={usage.get('completion_tokens')})"
             )
 
-            jobs[transcript_id] = {
+            jobs[job_id] = {
                 "status": "done",
                 "draft": draft,
                 "transcript": formatted,
@@ -305,17 +282,45 @@ async def process_transcript(transcript_id: str):
                 "user_id": user_id,
                 "created_at": created_at,
                 "aai_started_at": aai_started_at,
+                "aai_transcript_id": aai_transcript_id,
                 "audio_duration_sec": audio_duration_sec,
             }
-            _sync_temp_jobs(transcript_id, "done")
         except Exception as e:
-            log.exception(f"Processing failed for {transcript_id}")
-            jobs[transcript_id] = {
+            log.exception(f"Processing failed for {job_id}")
+            jobs[job_id] = {
                 "status": "error",
                 "error": str(e),
                 "metadata": metadata,
                 "filename": filename,
                 "user_id": user_id,
                 "created_at": created_at,
+                "aai_transcript_id": aai_transcript_id,
             }
-            _sync_temp_jobs(transcript_id, "error")
+
+
+async def recover_pending_jobs():
+    """Scan DB on startup for unfinished jobs and resume or clean them up."""
+    try:
+        pending = jobs.get_pending_jobs()
+        if not pending:
+            return
+        log.info(f"Startup: found {len(pending)} pending jobs to recover")
+        for item in pending:
+            job_id = item.get("id")
+            if not job_id:
+                continue
+            phase = item.get("phase")
+            aai_transcript_id = item.get("aai_transcript_id")
+
+            if phase == "uploading_to_aai" and not aai_transcript_id:
+                item.update({
+                    "status": "error",
+                    "error": "Обработка прервана перезапуском сервера. Пожалуйста, загрузите файл повторно.",
+                })
+                jobs[job_id] = item
+                log.warning(f"[{job_id}] Interrupted during initial upload — marked as error")
+            else:
+                log.info(f"[{job_id}] Resuming background processing (phase={phase}, aai_transcript_id={aai_transcript_id})")
+                asyncio.create_task(process_transcript(job_id))
+    except Exception:
+        log.exception("Startup job recovery failed (non-fatal)")
