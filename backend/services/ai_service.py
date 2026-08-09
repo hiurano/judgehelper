@@ -480,5 +480,77 @@ async def recover_pending_jobs():
             else:
                 log.info(f"[{job_id}] Resuming background processing (phase={phase}, aai_transcript_id={aai_transcript_id})")
                 asyncio.create_task(process_transcript(job_id))
-    except Exception:
-        log.exception("Startup job recovery failed (non-fatal)")
+    except Exception as e:
+        log.exception(f"Error recovering pending jobs: {e}")
+
+
+async def aai_polling_loop():
+    """
+    Background loop that polls AssemblyAI for pending jobs.
+    If webhooks are configured, it runs less frequently as a fallback.
+    If webhooks are NOT configured, it polls every 15 seconds.
+    """
+    sleep_interval = 60 if (BASE_URL and WEBHOOK_SECRET) else 15
+    while True:
+        try:
+            await asyncio.sleep(sleep_interval)
+            pending = jobs.get_pending_jobs()
+            if not pending:
+                continue
+
+            client = get_shared_client()
+            for p_job in pending:
+                job_id = p_job.get("id")
+                aai_id = p_job.get("aai_transcript_id")
+                
+                if not aai_id or p_job.get("phase") != "transcribing":
+                    continue
+                
+                # If someone is already processing this job (e.g. webhook just fired), skip
+                lock = get_lock(job_id)
+                if lock.locked():
+                    continue
+
+                try:
+                    tx_resp = await client.get(
+                        f"https://api.assemblyai.com/v2/transcript/{aai_id}",
+                        headers={"authorization": ASSEMBLYAI_KEY},
+                    )
+                    if tx_resp.status_code == 404:
+                        continue
+                    tx_resp.raise_for_status()
+                    aai_body = tx_resp.json()
+                    
+                    aai_status = aai_body.get("status")
+                    aai_audio_duration = aai_body.get("audio_duration")
+                    
+                    cached = jobs.get(job_id, {})
+                    if not cached or cached.get("status") in ("done", "error"):
+                        continue
+                        
+                    if aai_audio_duration and not cached.get("audio_duration_sec"):
+                        cached["audio_duration_sec"] = aai_audio_duration
+
+                    if aai_status == "error":
+                        cached.update({"status": "error", "error": aai_body.get("error", "AssemblyAI error")})
+                        jobs[job_id] = cached
+                    elif aai_status == "completed":
+                        cached.update({
+                            "status": "processing",
+                            "phase": "drafting",
+                            "drafting_started_at": cached.get("drafting_started_at") or int(time.time()),
+                        })
+                        jobs[job_id] = cached
+                        if not lock.locked():
+                            asyncio.create_task(process_transcript(job_id))
+                    else:
+                        cached.update({"aai_status": aai_status})
+                        jobs[job_id] = cached
+
+                except Exception as inner_e:
+                    log.error(f"[{job_id}] Polling error: {inner_e}")
+                    
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.exception(f"Error in aai_polling_loop: {e}")
