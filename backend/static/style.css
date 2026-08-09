@@ -714,7 +714,7 @@ button.history-dots-btn:hover {
     text-align: left !important;
     background: transparent !important;
     border: none !important;
-    color: #E56B6B !important;
+    color: var(--text-main) !important;
     font-size: 0.85rem !important;
     padding: 0.5rem 0.6rem !important;
     border-radius: 6px !important;
@@ -723,10 +723,18 @@ button.history-dots-btn:hover {
     font-weight: 500 !important;
     box-shadow: none !important;
     font-family: inherit !important;
-    transition: background 0.15s ease !important;
+    transition: background 0.15s ease, color 0.15s ease !important;
 }
 
 .item-dropdown-btn:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.item-dropdown-btn.danger {
+    color: #E56B6B !important;
+}
+
+.item-dropdown-btn.danger:hover {
     background: rgba(229, 107, 107, 0.12) !important;
 }
 
