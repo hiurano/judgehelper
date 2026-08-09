@@ -27,7 +27,7 @@
 - `config.py` — загрузка переменных окружения (`.env`), настроек, динамическое перечитывание промпта (hot-reload) и ротация логов (`RotatingFileHandler`).
 - `db.py` — SQLite хранилище для задач (`JobStore`) с индексированными колонками и менеджером блокировок, и хранилище пользователей (`UserStore`).
 - `services/` — специализированные модули:
-  - `ai_service.py` — вызовы ASR (AssemblyAI) и LLM (OpenRouter/DeepSeek/Gemini) с повторами (`async_retry`) и авто-переключением моделей.
+  - `ai_service.py` — вызовы ASR (AssemblyAI) и LLM (OpenRouter/DeepSeek/OpenAI/Gemini/Claude) с повторами (`async_retry`) и авто-переключением моделей.
   - `docx_generator.py` — сборка документов Word с соблюдением судебных отступов и шрифтов.
   - `text_cleaner.py` — движок Regex-замен судебной терминологии и фамилий.
 - `tests/` — комплексный пакет автоматических интеграционных и модульных тестов (`pytest`).
