@@ -143,61 +143,87 @@ async def submit_to_assemblyai(job_id: str, audio: bytes, filename: str):
 
 async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_prefix: str):
     """Try each model in LLM_FALLBACK_CHAIN until one returns a valid draft.
+    Handles finish_reason='length' by prompting the model to continue.
     Returns (draft, used_model, usage_dict). Raises if all models fail."""
     last_error: Optional[str] = None
     for model in LLM_FALLBACK_CHAIN:
         try:
-            async def _do_llm_call():
-                llm_resp = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {OPENROUTER_KEY}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://github.com/judge-helper",
-                        "X-Title": "Judge Helper",
-                    },
-                    json={
-                        "model": model,
-                        "max_tokens": 16000,
-                        "temperature": 0.3,
-                        "messages": [
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": user_msg},
-                        ],
-                    },
-                )
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ]
+            full_draft = ""
+            total_usage = {"prompt_tokens": 0, "completion_tokens": 0}
+            is_completed = False
+
+            for loop_idx in range(5):
+                async def _do_llm_call():
+                    llm_resp = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {OPENROUTER_KEY}",
+                            "Content-Type": "application/json",
+                            "HTTP-Referer": "https://github.com/judge-helper",
+                            "X-Title": "Judge Helper",
+                        },
+                        json={
+                            "model": model,
+                            "max_tokens": 16000,
+                            "temperature": 0.3,
+                            "messages": messages,
+                        },
+                    )
+                    if llm_resp.status_code != 200:
+                        raise RuntimeError(f"HTTP {llm_resp.status_code}: {llm_resp.text[:300]}")
+                    return llm_resp
+
+                llm_resp = await async_retry(_do_llm_call, retries=2, delay=0.5)
                 if llm_resp.status_code != 200:
-                    raise RuntimeError(f"HTTP {llm_resp.status_code}: {llm_resp.text[:300]}")
-                return llm_resp
+                    last_error = f"{model}: HTTP {llm_resp.status_code}: {llm_resp.text[:300]}"
+                    log.warning(f"[{log_prefix}] {last_error}; trying next model")
+                    break  # Break out of loop_idx, go to next model
 
-            llm_resp = await async_retry(_do_llm_call, retries=2, delay=0.5)
-            if llm_resp.status_code != 200:
-                last_error = f"{model}: HTTP {llm_resp.status_code}: {llm_resp.text[:300]}"
-                log.warning(f"[{log_prefix}] {last_error}; trying next model")
+                llm_data = llm_resp.json()
+
+                if isinstance(llm_data, dict) and "error" in llm_data:
+                    err = llm_data["error"]
+                    err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                    last_error = f"{model}: {err_msg}"
+                    log.warning(f"[{log_prefix}] {last_error}; trying next model")
+                    break
+
+                choices = llm_data.get("choices") if isinstance(llm_data, dict) else None
+                if not choices:
+                    last_error = f"{model}: no choices in response — {str(llm_data)[:300]}"
+                    log.warning(f"[{log_prefix}] {last_error}; trying next model")
+                    break
+
+                draft = choices[0].get("message", {}).get("content")
+                if not draft:
+                    last_error = f"{model}: empty content in choices[0]"
+                    log.warning(f"[{log_prefix}] {last_error}; trying next model")
+                    break
+
+                full_draft += draft
+                usage = llm_data.get("usage", {})
+                total_usage["prompt_tokens"] = max(total_usage["prompt_tokens"], usage.get("prompt_tokens", 0))
+                total_usage["completion_tokens"] += usage.get("completion_tokens", 0)
+
+                finish_reason = choices[0].get("finish_reason")
+                if finish_reason == "length" or len(draft) > 15000:
+                    log.info(f"[{log_prefix}] Model hit token limit (length={len(draft)}, reason={finish_reason}). Continuing...")
+                    messages.append({"role": "assistant", "content": draft})
+                    messages.append({"role": "user", "content": "Твой предыдущий ответ оборвался из-за лимита токенов. Пожалуйста, продолжи строго с того места, где ты прервался, не повторяя уже написанное и ничего не пропуская."})
+                    continue
+                else:
+                    is_completed = True
+                    break
+
+            if is_completed and full_draft:
+                return full_draft, model, total_usage
+            else:
+                last_error = f"{model}: Failed to complete draft within iteration limits."
                 continue
-
-            llm_data = llm_resp.json()
-
-            if isinstance(llm_data, dict) and "error" in llm_data:
-                err = llm_data["error"]
-                err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-                last_error = f"{model}: {err_msg}"
-                log.warning(f"[{log_prefix}] {last_error}; trying next model")
-                continue
-
-            choices = llm_data.get("choices") if isinstance(llm_data, dict) else None
-            if not choices:
-                last_error = f"{model}: no choices in response — {str(llm_data)[:300]}"
-                log.warning(f"[{log_prefix}] {last_error}; trying next model")
-                continue
-
-            draft = choices[0].get("message", {}).get("content")
-            if not draft:
-                last_error = f"{model}: empty content in choices[0]"
-                log.warning(f"[{log_prefix}] {last_error}; trying next model")
-                continue
-
-            return draft, model, llm_data.get("usage", {})
 
         except Exception as e:
             last_error = f"{model}: {e}"
