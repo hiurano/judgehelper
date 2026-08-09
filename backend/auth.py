@@ -281,6 +281,10 @@ LOGIN_HTML = """<!DOCTYPE html>
 
             <div class="changelog-list">
                 <div class="changelog-item">
+                    <div class="changelog-date">09 августа 2026</div>
+                    <div class="changelog-desc">Архитектурный рефакторинг бэкенда: zero-RAM загрузка, гибридный вебхук/поллинг, турбо-база данных на индексах и динамическая смена промптов.</div>
+                </div>
+                <div class="changelog-item">
                     <div class="changelog-date">07 августа 2026</div>
                     <div class="changelog-desc">Умная фоновая очередь файлов, расчёт сэкономленного времени и нативная монохромная тема Noctalia.</div>
                 </div>
