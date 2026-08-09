@@ -3,6 +3,7 @@ AI service module for AssemblyAI transcription and OpenRouter LLM drafting.
 """
 import asyncio
 import time
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -374,7 +375,8 @@ async def process_transcript(job_id: str):
                             prompt = (
                                 f"{meta_block}"
                                 f"Это ЧАСТЬ 1 из {len(chunks)} стенограммы судебного заседания.\n"
-                                "Сформируй вводную часть протокола (шапку, состав суда, наименование дела) и оформи начальные реплики в официальном стиле:\n\n"
+                                "Сформируй вводную часть протокола (шапку, состав суда, наименование дела) и оформи начальные реплики в официальном стиле.\n"
+                                "ВАЖНО: В самом конце своего ответа ОБЯЗАТЕЛЬНО напиши строгий маппинг в формате: [КЛЮЧ РОЛЕЙ: Спикер А = Судья, Спикер B = Защитник и т.д.]\n\n"
                                 f"{chunk_text}"
                             )
                         elif idx == len(chunks) - 1:
@@ -390,16 +392,30 @@ async def process_transcript(job_id: str):
                                 f"Это ЧАСТЬ {idx + 1} из {len(chunks)} стенограммы судебного заседания.\n"
                                 f"Контекст для сохранения ролей (конец предыдущей части):\n{last_context}\n\n"
                                 "ОБЯЗАТЕЛЬНО преобразуй ВСЕ метки [Спикер A/B/C/D]: в официальные судебные роли (Председательствующий:, Защитник:, Государственный обвинитель:, Подсудимый:, Свидетель:). Запрещено оставлять сырые метки [Спикер X]!\n"
-                                "Оформи содержательную часть реплик и действий участников процесса в официальном стиле (без повторного ввода новой шапки или подписей):\n\n"
+                                "Оформи содержательную часть реплик и действий участников процесса в официальном стиле.\n"
+                                "ВАЖНО: В самом конце своего ответа ОБЯЗАТЕЛЬНО напиши строгий маппинг в формате: [КЛЮЧ РОЛЕЙ: Спикер А = Судья, Спикер B = Защитник и т.д.]\n\n"
                                 f"{chunk_text}"
                             )
 
                         c_draft, c_model, c_usage = await call_llm_with_fallback(
                             client, prompt, f"{job_id}-chunk-{idx + 1}"
                         )
-                        drafts.append(c_draft)
-                        # Save last 1500 chars to maintain character identities across chunks
-                        last_context = c_draft[-1500:] if len(c_draft) > 1500 else c_draft
+
+                        # Extract role key if present and remove from final draft text
+                        role_key_match = re.search(r'\[КЛЮЧ РОЛЕЙ:.*?\]', c_draft, re.DOTALL | re.IGNORECASE)
+                        if role_key_match:
+                            role_key = role_key_match.group(0)
+                            c_draft_clean = c_draft.replace(role_key, '').strip()
+                        else:
+                            role_key = ""
+                            c_draft_clean = c_draft
+
+                        drafts.append(c_draft_clean)
+                        
+                        # Save last 1500 chars + role key to maintain character identities across chunks
+                        last_text = c_draft_clean[-1500:] if len(c_draft_clean) > 1500 else c_draft_clean
+                        last_context = f"{last_text}\n\nСОХРАНЕННЫЙ МАППИНГ РОЛЕЙ ИЗ ПРЕДЫДУЩЕЙ ЧАСТИ:\n{role_key}"
+                        
                         if not used_model:
                             used_model = c_model
                         total_prompt_tokens += (c_usage or {}).get("prompt_tokens", 0)
