@@ -3,6 +3,7 @@ AI service module for AssemblyAI transcription and OpenRouter LLM drafting.
 """
 import asyncio
 import time
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -62,16 +63,26 @@ async def close_shared_client():
         _shared_client = None
 
 
-async def submit_to_assemblyai(job_id: str, audio: bytes, filename: str):
-    """Background task: upload bytes to AssemblyAI and update transcription job."""
+async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
+    """Background task: stream file from disk to AssemblyAI and update transcription job."""
     try:
         client = get_shared_client()
+
+        async def file_streamer():
+            def read_chunk(f):
+                return f.read(64 * 1024)
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = await asyncio.to_thread(read_chunk, f)
+                    if not chunk:
+                        break
+                    yield chunk
 
         async def _do_upload():
             up_resp = await client.post(
                 "https://api.assemblyai.com/v2/upload",
                 headers={"authorization": ASSEMBLYAI_KEY},
-                content=audio,
+                content=file_streamer(),
             )
             if up_resp.status_code != 200:
                 raise RuntimeError(
@@ -140,6 +151,10 @@ async def submit_to_assemblyai(job_id: str, audio: bytes, filename: str):
             "error": f"Не удалось отправить файл на расшифровку: {e}",
         })
         jobs[job_id] = existing
+    finally:
+        # Clean up the temporary file from disk
+        if isinstance(file_path, Path):
+            file_path.unlink(missing_ok=True)
 
 
 def split_transcript_into_chunks(formatted_text: str, max_chunk_chars: int = 12000) -> list[str]:
