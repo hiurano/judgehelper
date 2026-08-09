@@ -336,7 +336,7 @@ def _login_page(error: str = "") -> HTMLResponse:
 async def login_page_handler(request: Request):
     token = request.cookies.get(SESSION_COOKIE)
     user = verify_session_token(token)
-    if user and user in USERS:
+    if user and user_store.exists(user):
         return RedirectResponse(url="/", status_code=303)
     return _login_page()
 
