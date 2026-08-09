@@ -45,6 +45,7 @@ from backend.config import (
 )
 from backend.db import get_lock, jobs, user_store
 from backend.services.ai_service import (
+    aai_polling_loop,
     async_retry,
     close_shared_client,
     get_shared_client,
@@ -73,6 +74,9 @@ async def lifespan(app: FastAPI):
         n = jobs.cleanup_old(JOB_TTL_DAYS)
         if n:
             log.info(f"Startup: pruned {n} job entries older than {JOB_TTL_DAYS} days")
+        
+        # Start background tasks
+        asyncio.create_task(aai_polling_loop())
         await recover_pending_jobs()
     except Exception:
         log.exception("Startup cleanup/recovery failed (non-fatal)")
@@ -277,51 +281,6 @@ async def status(job_id: str):
     if not cached:
         raise HTTPException(404, "Job not found")
 
-    if cached.get("status") in ("done", "error"):
-        return cached
-
-    aai_transcript_id = cached.get("aai_transcript_id")
-    if not aai_transcript_id:
-        return cached
-
-    client = get_shared_client()
-
-    async def _fetch_status():
-        tx_resp = await client.get(
-            f"https://api.assemblyai.com/v2/transcript/{aai_transcript_id}",
-            headers={"authorization": ASSEMBLYAI_KEY},
-        )
-        if tx_resp.status_code == 404:
-            raise HTTPException(404, "Job not found on AssemblyAI")
-        tx_resp.raise_for_status()
-        return tx_resp.json()
-
-    aai_body = await async_retry(_fetch_status, retries=2, delay=0.5)
-    aai_status = aai_body.get("status")
-    aai_audio_duration = aai_body.get("audio_duration")
-
-    if aai_audio_duration and not cached.get("audio_duration_sec"):
-        cached["audio_duration_sec"] = aai_audio_duration
-
-    if aai_status == "error":
-        cached.update({"status": "error", "error": aai_body.get("error", "AssemblyAI error")})
-        jobs[job_id] = cached
-        return cached
-
-    if aai_status != "completed":
-        cached.update({"status": "processing", "phase": "transcribing", "aai_status": aai_status})
-        jobs[job_id] = cached
-        return cached
-
-    lock = get_lock(job_id)
-    cached.update({
-        "status": "processing",
-        "phase": "drafting",
-        "drafting_started_at": cached.get("drafting_started_at") or int(time.time()),
-    })
-    jobs[job_id] = cached
-    if not lock.locked():
-        asyncio.create_task(process_transcript(job_id))
     return cached
 
 
