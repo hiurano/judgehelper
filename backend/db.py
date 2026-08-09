@@ -103,6 +103,11 @@ class JobStore:
         with self._lock, self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
+    def delete(self, job_id: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+            return cur.rowcount > 0
+
     def cleanup_old(self, max_age_days: int) -> int:
         cutoff = int(time.time()) - max_age_days * 86400
         with self._lock, self._conn() as conn:

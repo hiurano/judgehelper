@@ -313,6 +313,23 @@ async def list_jobs(request: Request):
     return {"jobs": cleaned}
 
 
+@app.delete("/jobs/{job_id}")
+async def delete_job(job_id: str, request: Request):
+    user_id = getattr(request.state, "user", "elena")
+    job_data = jobs.get(job_id)
+    if not job_data:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # Verify owner if user is not None
+    job_owner = job_data.get("user_id")
+    if job_owner and user_id and job_owner != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this protocol")
+        
+    success = jobs.delete(job_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete job")
+    return {"ok": True}
+
+
 @app.get("/api/me")
 async def get_me(request: Request):
     user_id = getattr(request.state, "user", "elena")
