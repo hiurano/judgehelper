@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.auth import SESSION_COOKIE, make_session_token
+from backend.db import user_store
 
 client = TestClient(app)
 
@@ -13,6 +14,8 @@ client = TestClient(app)
 def auth_client(monkeypatch):
     import backend.main as main_mod
     monkeypatch.setattr(main_mod, "ASSEMBLYAI_KEY", "test-aai-key-12345")
+    # Ensure test user exists in SQLite
+    user_store.create_user("elena", "protocol2026", "Елена")
     test_client = TestClient(app)
     test_client.cookies.set(SESSION_COOKIE, make_session_token("elena"))
     return test_client

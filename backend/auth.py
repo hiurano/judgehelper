@@ -13,12 +13,11 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from backend.config import (
-    AUTH_PASSWORD,
-    AUTH_USERNAME,
     SECRET_KEY,
     WEBHOOK_SECRET,
     log,
 )
+from backend.db import user_store
 
 SESSION_COOKIE = "judge_helper_session"
 SESSION_DURATION = 60 * 60 * 24 * 30  # 30 days
@@ -34,18 +33,10 @@ PUBLIC_PATHS = {
     "/favicon.ico",
 }
 PUBLIC_PREFIXES = ("/static/",)
-USERS = {
-    "elena": "protocol2026",
-    "test": "Test-2026",
-}
-if AUTH_USERNAME and AUTH_PASSWORD:
-    USERS[AUTH_USERNAME] = AUTH_PASSWORD
 
 
 def verify_user_credentials(username: str, password: str) -> bool:
-    if username in USERS:
-        return secrets.compare_digest(password, USERS[username])
-    return False
+    return user_store.verify(username, password)
 
 
 def _session_secret() -> str:
@@ -89,7 +80,7 @@ async def session_auth_middleware(request: Request, call_next):
 
     token = request.cookies.get(SESSION_COOKIE)
     username = verify_session_token(token)
-    if username and username in USERS:
+    if username and user_store.exists(username):
         request.state.user = username
         return await call_next(request)
 

@@ -10,6 +10,7 @@ import httpx
 from backend.config import (
     ASSEMBLYAI_KEY,
     BASE_URL,
+    DEFAULT_USER,
     LLM_FALLBACK_CHAIN,
     OPENROUTER_KEY,
     SYSTEM_PROMPT,
@@ -271,7 +272,7 @@ async def process_transcript(job_id: str):
             if existing.get("status") == "done":
                 return
             metadata = existing.get("metadata", {})
-            user_id = existing.get("user_id", "elena")
+            user_id = existing.get("user_id", DEFAULT_USER)
             filename = existing.get("filename", "")
             created_at = existing.get("created_at", int(time.time()))
             aai_started_at = existing.get("aai_started_at", created_at)
