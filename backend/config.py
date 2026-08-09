@@ -19,7 +19,8 @@ logging.basicConfig(
     handlers=[
         logging.StreamHandler(),
         RotatingFileHandler(LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"),
-    ]
+    ],
+    force=True,
 )
 log = logging.getLogger("judge-helper")
 

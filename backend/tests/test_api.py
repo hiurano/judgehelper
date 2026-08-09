@@ -115,3 +115,16 @@ def test_session_token_with_custom_secret_key(monkeypatch):
     assert username == "elena"
 
 
+def test_log_rotation_handler_configured():
+    import logging
+    from logging.handlers import RotatingFileHandler
+    import backend.config as config
+
+    root_logger = logging.getLogger()
+    handlers = [h for h in root_logger.handlers if isinstance(h, RotatingFileHandler)]
+    assert len(handlers) > 0, "RotatingFileHandler missing from root logger"
+    rf = handlers[0]
+    assert rf.maxBytes == 10 * 1024 * 1024
+    assert rf.backupCount == 5
+
+
