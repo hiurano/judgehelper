@@ -128,3 +128,21 @@ def test_log_rotation_handler_configured():
     assert rf.backupCount == 5
 
 
+def test_async_retry_helper():
+    import asyncio
+    from backend.services.ai_service import async_retry
+
+    attempts = 0
+
+    async def flaky_call():
+        nonlocal attempts
+        attempts += 1
+        if attempts < 2:
+            raise RuntimeError("Temporary network glitch")
+        return "success"
+
+    result = asyncio.run(async_retry(flaky_call, retries=3, delay=0.01))
+    assert result == "success"
+    assert attempts == 2
+
+

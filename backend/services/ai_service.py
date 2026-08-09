@@ -1,6 +1,7 @@
 """
 AI service module for AssemblyAI transcription and OpenRouter LLM drafting.
 """
+import asyncio
 import time
 from typing import Optional
 
@@ -20,6 +21,23 @@ from backend.db import get_lock, jobs
 from backend.services.text_cleaner import clean_transcript, format_metadata_block
 
 _shared_client: Optional[httpx.AsyncClient] = None
+
+
+async def async_retry(coro_fn, retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
+    """Retry an async operation on transient network failures or HTTP errors."""
+    last_exc = None
+    curr_delay = delay
+    for attempt in range(1, retries + 1):
+        try:
+            return await coro_fn()
+        except Exception as exc:
+            last_exc = exc
+            if attempt == retries:
+                break
+            log.warning(f"Network call failed (attempt {attempt}/{retries}): {exc}. Retrying in {curr_delay:.1f}s...")
+            await asyncio.sleep(curr_delay)
+            curr_delay *= backoff
+    raise last_exc
 
 
 def get_shared_client() -> httpx.AsyncClient:
@@ -43,16 +61,20 @@ async def submit_to_assemblyai(job_id: str, audio: bytes, filename: str):
     """Background task: upload bytes to AssemblyAI and update transcription job."""
     try:
         client = get_shared_client()
-        up_resp = await client.post(
-            "https://api.assemblyai.com/v2/upload",
-            headers={"authorization": ASSEMBLYAI_KEY},
-            content=audio,
-        )
-        if up_resp.status_code != 200:
-            raise RuntimeError(
-                f"AssemblyAI upload {up_resp.status_code}: {up_resp.text[:300]}"
+
+        async def _do_upload():
+            up_resp = await client.post(
+                "https://api.assemblyai.com/v2/upload",
+                headers={"authorization": ASSEMBLYAI_KEY},
+                content=audio,
             )
-        audio_url = up_resp.json()["upload_url"]
+            if up_resp.status_code != 200:
+                raise RuntimeError(
+                    f"AssemblyAI upload {up_resp.status_code}: {up_resp.text[:300]}"
+                )
+            return up_resp.json()["upload_url"]
+
+        audio_url = await async_retry(_do_upload, retries=3, delay=1.0)
         log.info(f"[{job_id}] Uploaded to AssemblyAI ({filename})")
 
         job_meta = jobs.get(job_id, {}).get("metadata", {})
@@ -78,19 +100,22 @@ async def submit_to_assemblyai(job_id: str, audio: bytes, filename: str):
             body["webhook_auth_header_name"] = "x-webhook-secret"
             body["webhook_auth_header_value"] = WEBHOOK_SECRET
 
-        submit_resp = await client.post(
-            "https://api.assemblyai.com/v2/transcript",
-            headers={
-                "authorization": ASSEMBLYAI_KEY,
-                "content-type": "application/json",
-            },
-            json=body,
-        )
-        if submit_resp.status_code != 200:
-            raise RuntimeError(
-                f"AssemblyAI submit {submit_resp.status_code}: {submit_resp.text[:300]}"
+        async def _do_submit():
+            submit_resp = await client.post(
+                "https://api.assemblyai.com/v2/transcript",
+                headers={
+                    "authorization": ASSEMBLYAI_KEY,
+                    "content-type": "application/json",
+                },
+                json=body,
             )
-        aai_transcript_id = submit_resp.json()["id"]
+            if submit_resp.status_code != 200:
+                raise RuntimeError(
+                    f"AssemblyAI submit {submit_resp.status_code}: {submit_resp.text[:300]}"
+                )
+            return submit_resp.json()["id"]
+
+        aai_transcript_id = await async_retry(_do_submit, retries=3, delay=1.0)
 
         now = int(time.time())
         existing = jobs.get(job_id, {})
@@ -118,24 +143,30 @@ async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_p
     last_error: Optional[str] = None
     for model in LLM_FALLBACK_CHAIN:
         try:
-            llm_resp = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://github.com/judge-helper",
-                    "X-Title": "Judge Helper",
-                },
-                json={
-                    "model": model,
-                    "max_tokens": 16000,
-                    "temperature": 0.3,
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": user_msg},
-                    ],
-                },
-            )
+            async def _do_llm_call():
+                llm_resp = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {OPENROUTER_KEY}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://github.com/judge-helper",
+                        "X-Title": "Judge Helper",
+                    },
+                    json={
+                        "model": model,
+                        "max_tokens": 16000,
+                        "temperature": 0.3,
+                        "messages": [
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": user_msg},
+                        ],
+                    },
+                )
+                if llm_resp.status_code != 200:
+                    raise RuntimeError(f"HTTP {llm_resp.status_code}: {llm_resp.text[:300]}")
+                return llm_resp
+
+            llm_resp = await async_retry(_do_llm_call, retries=2, delay=0.5)
             if llm_resp.status_code != 200:
                 last_error = f"{model}: HTTP {llm_resp.status_code}: {llm_resp.text[:300]}"
                 log.warning(f"[{log_prefix}] {last_error}; trying next model")
@@ -203,12 +234,16 @@ async def process_transcript(job_id: str):
 
         try:
             client = get_shared_client()
-            tx_resp = await client.get(
-                f"https://api.assemblyai.com/v2/transcript/{aai_transcript_id}",
-                headers={"authorization": ASSEMBLYAI_KEY},
-            )
-            tx_resp.raise_for_status()
-            transcript = tx_resp.json()
+
+            async def _do_fetch_transcript():
+                tx_resp = await client.get(
+                    f"https://api.assemblyai.com/v2/transcript/{aai_transcript_id}",
+                    headers={"authorization": ASSEMBLYAI_KEY},
+                )
+                tx_resp.raise_for_status()
+                return tx_resp.json()
+
+            transcript = await async_retry(_do_fetch_transcript, retries=3, delay=1.0)
 
             audio_duration_sec = transcript.get("audio_duration") or audio_duration_sec
 
