@@ -363,12 +363,13 @@ async def process_transcript(job_id: str):
                         client, user_msg, job_id
                     )
                 else:
-                    log.info(f"[{job_id}] Transcript split into {len(chunks)} chunks for parallel drafting with stagger.")
+                    log.info(f"[{job_id}] Transcript split into {len(chunks)} chunks for sequential drafting.")
+                    drafts = []
+                    used_model = None
+                    total_prompt_tokens = 0
+                    total_completion_tokens = 0
 
-                    async def process_chunk(idx: int, chunk_text: str):
-                        if idx > 0:
-                            await asyncio.sleep(0.4 * idx)
-
+                    for idx, chunk_text in enumerate(chunks):
                         if idx == 0:
                             prompt = (
                                 f"{meta_block}"
@@ -392,17 +393,15 @@ async def process_transcript(job_id: str):
                         c_draft, c_model, c_usage = await call_llm_with_fallback(
                             client, prompt, f"{job_id}-chunk-{idx + 1}"
                         )
-                        return idx, c_draft, c_model, c_usage
+                        drafts.append(c_draft)
+                        if not used_model:
+                            used_model = c_model
+                        total_prompt_tokens += (c_usage or {}).get("prompt_tokens", 0)
+                        total_completion_tokens += (c_usage or {}).get("completion_tokens", 0)
 
-                    tasks = [process_chunk(i, c) for i, c in enumerate(chunks)]
-                    results = await asyncio.gather(*tasks)
-                    results.sort(key=lambda r: r[0])
-
-                    drafts = [r[1] for r in results]
-                    used_model = results[0][2]
                     usage = {
-                        "prompt_tokens": sum((r[3] or {}).get("prompt_tokens", 0) for r in results),
-                        "completion_tokens": sum((r[3] or {}).get("completion_tokens", 0) for r in results),
+                        "prompt_tokens": total_prompt_tokens,
+                        "completion_tokens": total_completion_tokens,
                     }
                     draft = "\n\n".join(drafts)
 
