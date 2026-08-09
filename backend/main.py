@@ -32,7 +32,9 @@ from backend.config import (
     AUTH_PASSWORD,
     AUTH_USERNAME,
     BASE_URL,
+    DEFAULT_USER,
     JOB_TTL_DAYS,
+    MAX_UPLOAD_BYTES,
     MODEL,
     OPENROUTER_KEY,
     STATIC_DIR,
@@ -40,7 +42,7 @@ from backend.config import (
     WEBHOOK_SECRET,
     log,
 )
-from backend.db import get_lock, jobs
+from backend.db import get_lock, jobs, user_store
 from backend.services.ai_service import (
     async_retry,
     close_shared_client,
@@ -55,6 +57,18 @@ from backend.services.docx_generator import render_docx
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
+        # Ensure default users exist (create_user is idempotent — skips if exists)
+        seeded = []
+        if user_store.create_user("elena", "protocol2026", "Елена"):
+            seeded.append("elena")
+        if user_store.create_user("test", "Test-2026", "Тест"):
+            seeded.append("test")
+        if AUTH_USERNAME and AUTH_PASSWORD:
+            if user_store.create_user(AUTH_USERNAME, AUTH_PASSWORD):
+                seeded.append(AUTH_USERNAME)
+        if seeded:
+            log.info(f"Seeded user accounts: {', '.join(seeded)}")
+
         n = jobs.cleanup_old(JOB_TTL_DAYS)
         if n:
             log.info(f"Startup: pruned {n} job entries older than {JOB_TTL_DAYS} days")
@@ -165,19 +179,25 @@ async def upload(
     allowed_exts = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma", ".webm", ".opus", ".mp4"}
     filename = file.filename or ""
     ext = Path(filename).suffix.lower()
-    if ext and ext not in allowed_exts:
+    if not ext or ext not in allowed_exts:
         raise HTTPException(
             400,
-            f"Неподдерживаемый формат файла ({ext}). Разрешены аудиофайлы: MP3, WAV, M4A, OGG, FLAC, AAC, WMA, WEBM.",
+            f"Неподдерживаемый формат файла ({ext or 'нет расширения'}). "
+            "Разрешены аудиофайлы: MP3, WAV, M4A, OGG, FLAC, AAC, WMA, WEBM.",
         )
 
-    user_id = getattr(request.state, "user", "elena")
+    # Pre-check Content-Length to reject oversized uploads before reading into RAM
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
+
+    user_id = getattr(request.state, "user", DEFAULT_USER)
     audio = await file.read()
     if not audio:
         raise HTTPException(400, "Загруженный файл пуст")
 
     size_mb = len(audio) / 1024 / 1024
-    if size_mb > 1024:
+    if size_mb > MAX_UPLOAD_BYTES / (1024 * 1024):
         raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
 
     if not ASSEMBLYAI_KEY:
@@ -291,7 +311,7 @@ async def status(job_id: str):
 
 @app.get("/jobs")
 async def list_jobs(request: Request):
-    user_id = getattr(request.state, "user", "elena")
+    user_id = getattr(request.state, "user", DEFAULT_USER)
     recent = jobs.list_recent(user_id=user_id, limit=30)
     cleaned = []
     for item in recent:
@@ -315,7 +335,7 @@ async def list_jobs(request: Request):
 
 @app.delete("/jobs/{job_id}")
 async def delete_job(job_id: str, request: Request):
-    user_id = getattr(request.state, "user", "elena")
+    user_id = getattr(request.state, "user", DEFAULT_USER)
     job_data = jobs.get(job_id)
     if not job_data:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -332,7 +352,7 @@ async def delete_job(job_id: str, request: Request):
 
 @app.get("/api/me")
 async def get_me(request: Request):
-    user_id = getattr(request.state, "user", "elena")
+    user_id = getattr(request.state, "user", DEFAULT_USER)
     stats = jobs.get_user_stats(user_id)
     display_name = user_id.capitalize()
     return {

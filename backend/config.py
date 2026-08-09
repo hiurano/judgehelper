@@ -41,6 +41,8 @@ AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
 DB_PATH = os.environ.get("DB_PATH") or str(BACKEND_DIR / "data" / "jobs.db")
 JOB_TTL_DAYS = int(os.environ.get("JOB_TTL_DAYS", "30"))
+DEFAULT_USER = os.environ.get("DEFAULT_USER", "elena")
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB
 
 # Models tried in order; first success wins.
 LLM_FALLBACK_CHAIN: list[str] = list(dict.fromkeys([
