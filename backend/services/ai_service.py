@@ -141,6 +141,33 @@ async def submit_to_assemblyai(job_id: str, audio: bytes, filename: str):
         jobs[job_id] = existing
 
 
+def split_transcript_into_chunks(formatted_text: str, max_chunk_chars: int = 12000) -> list[str]:
+    """Split transcript text into chunks of at most max_chunk_chars,
+    splitting only on utterance boundaries (double newlines) to avoid breaking sentences."""
+    if len(formatted_text) <= max_chunk_chars:
+        return [formatted_text]
+
+    paragraphs = formatted_text.split("\n\n")
+    chunks = []
+    current_chunk = []
+    current_length = 0
+
+    for para in paragraphs:
+        para_len = len(para) + 2  # account for \n\n
+        if current_length + para_len > max_chunk_chars and current_chunk:
+            chunks.append("\n\n".join(current_chunk))
+            current_chunk = [para]
+            current_length = para_len
+        else:
+            current_chunk.append(para)
+            current_length += para_len
+
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+
+    return chunks
+
+
 async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_prefix: str):
     """Try each model in LLM_FALLBACK_CHAIN until one returns a valid draft.
     Handles finish_reason='length' by prompting the model to continue.
@@ -324,17 +351,61 @@ async def process_transcript(job_id: str):
                 }
 
                 meta_block = format_metadata_block(metadata)
-                user_msg = (
-                    f"{meta_block}"
-                    "Составь черновик протокола судебного заседания на основе "
-                    f"следующей размеченной стенограммы аудиозаписи:\n\n{formatted}"
-                )
-                draft, used_model, usage = await call_llm_with_fallback(
-                    client, user_msg, job_id
-                )
+                chunks = split_transcript_into_chunks(formatted, max_chunk_chars=12000)
+
+                if len(chunks) == 1:
+                    user_msg = (
+                        f"{meta_block}"
+                        "Составь черновик протокола судебного заседания на основе "
+                        f"следующей размеченной стенограммы аудиозаписи:\n\n{formatted}"
+                    )
+                    draft, used_model, usage = await call_llm_with_fallback(
+                        client, user_msg, job_id
+                    )
+                else:
+                    log.info(f"[{job_id}] Transcript split into {len(chunks)} chunks for parallel drafting.")
+
+                    async def process_chunk(idx: int, chunk_text: str):
+                        if idx == 0:
+                            prompt = (
+                                f"{meta_block}"
+                                f"Это ЧАСТЬ 1 из {len(chunks)} стенограммы судебного заседания.\n"
+                                "Сформируй вводную часть протокола (шапку, состав суда, наименование дела) и оформи начальные реплики в официальном стиле:\n\n"
+                                f"{chunk_text}"
+                            )
+                        elif idx == len(chunks) - 1:
+                            prompt = (
+                                f"Это ФИНАЛЬНАЯ ЧАСТЬ {idx + 1} из {len(chunks)} стенограммы судебного заседания.\n"
+                                "Продолжи оформление реплик и судебных действий в официальном стиле, а в конце сформируй итоговый блок подписей (председательствующий судья, секретарь):\n\n"
+                                f"{chunk_text}"
+                            )
+                        else:
+                            prompt = (
+                                f"Это ЧАСТЬ {idx + 1} из {len(chunks)} стенограммы судебного заседания.\n"
+                                "Оформи только содержательную часть реплик и действий участников процесса в официальном стиле (без повторного ввода новой шапки или подписей):\n\n"
+                                f"{chunk_text}"
+                            )
+
+                        c_draft, c_model, c_usage = await call_llm_with_fallback(
+                            client, prompt, f"{job_id}-chunk-{idx + 1}"
+                        )
+                        return idx, c_draft, c_model, c_usage
+
+                    tasks = [process_chunk(i, c) for i, c in enumerate(chunks)]
+                    results = await asyncio.gather(*tasks)
+                    results.sort(key=lambda r: r[0])
+
+                    drafts = [r[1] for r in results]
+                    used_model = results[0][2]
+                    usage = {
+                        "prompt_tokens": sum((r[3] or {}).get("prompt_tokens", 0) for r in results),
+                        "completion_tokens": sum((r[3] or {}).get("completion_tokens", 0) for r in results),
+                    }
+                    draft = "\n\n".join(drafts)
+
                 log.info(
                     f"[{job_id}] Draft via {used_model} ({len(draft)} chars, "
-                    f"in={usage.get('prompt_tokens')} out={usage.get('completion_tokens')})"
+                    f"chunks={len(chunks)}, in={usage.get('prompt_tokens')} out={usage.get('completion_tokens')})"
                 )
 
                 jobs[job_id] = {

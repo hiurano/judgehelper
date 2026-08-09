@@ -161,3 +161,23 @@ def test_lock_memory_cleanup():
     assert "job-test-lock-2" not in locks
 
 
+def test_split_transcript_into_chunks():
+    from backend.services.ai_service import split_transcript_into_chunks
+
+    # Short text should return a single chunk
+    short_text = "Paragraph 1\n\nParagraph 2"
+    assert split_transcript_into_chunks(short_text, max_chunk_chars=100) == [short_text]
+
+    # Long text should split cleanly on utterance boundaries (\n\n)
+    paras = [f"[Спикер A]: Это фрагмент речи №{i} с подробным описанием текста." for i in range(20)]
+    long_text = "\n\n".join(paras)
+    
+    chunks = split_transcript_into_chunks(long_text, max_chunk_chars=300)
+    assert len(chunks) > 1
+    # Check that re-joining matches original
+    assert "\n\n".join(chunks) == long_text
+    # Check that each chunk is within max_chunk_chars bounds
+    for chunk in chunks:
+        assert len(chunk) <= 400  # allowing reasonable room for paragraph boundaries
+
+
