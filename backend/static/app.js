@@ -845,17 +845,32 @@ function renderHistory() {
             await downloadDocx(job.draft, nameText);
         });
 
-        const delBtn = document.createElement('button');
-        delBtn.className = 'history-dl-btn';
-        delBtn.title = `Удалить ${nameText}`;
-        delBtn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#E56B6B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        const menuWrapper = document.createElement('div');
+        menuWrapper.className = 'item-dropdown-wrapper';
+
+        const dotsBtn = document.createElement('button');
+        dotsBtn.className = 'history-dl-btn';
+        dotsBtn.title = 'Опции';
+        dotsBtn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="1.5"></circle>
+            <circle cx="12" cy="5" r="1.5"></circle>
+            <circle cx="12" cy="19" r="1.5"></circle>
+        </svg>`;
+
+        const dropdownMenu = document.createElement('div');
+        dropdownMenu.className = 'item-dropdown';
+        dropdownMenu.hidden = true;
+
+        const delItemBtn = document.createElement('button');
+        delItemBtn.className = 'item-dropdown-btn';
+        delItemBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="3 6 5 6 21 6"></polyline>
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-        </svg>`;
-        delBtn.style.borderColor = 'rgba(229, 107, 107, 0.2)';
+        </svg><span>Удалить</span>`;
         
-        delBtn.addEventListener('click', async (e) => {
+        delItemBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
+            dropdownMenu.hidden = true;
             if (!confirm(`Удалить протокол «${nameText}»?\nВосстановить его будет невозможно.`)) return;
             try {
                 const resp = await fetch(`${BACKEND}/jobs/${job.id}`, { method: 'DELETE' });
@@ -871,8 +886,19 @@ function renderHistory() {
             }
         });
 
+        dotsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isHidden = dropdownMenu.hidden;
+            document.querySelectorAll('.item-dropdown').forEach(d => d.hidden = true);
+            dropdownMenu.hidden = !isHidden;
+        });
+
+        dropdownMenu.appendChild(delItemBtn);
+        menuWrapper.appendChild(dotsBtn);
+        menuWrapper.appendChild(dropdownMenu);
+
         actionsWrapper.appendChild(dlBtn);
-        actionsWrapper.appendChild(delBtn);
+        actionsWrapper.appendChild(menuWrapper);
 
         itemEl.appendChild(contentEl);
         itemEl.appendChild(actionsWrapper);
@@ -962,6 +988,10 @@ function initProfileDropdown() {
 loadHistoryJobs();
 fetchUserProfile();
 initProfileDropdown();
+
+document.addEventListener('click', () => {
+    document.querySelectorAll('.item-dropdown').forEach(d => d.hidden = true);
+});
 
 // Re-check jobs immediately on tab activation / unlock / online
 document.addEventListener('visibilitychange', () => {

@@ -662,6 +662,49 @@ button.history-dl-btn:hover {
     transform: translateY(-1px) !important;
 }
 
+/* Item Dropdown */
+.item-dropdown-wrapper {
+    position: relative;
+}
+
+.item-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 130px;
+    background: #252525;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    padding: 0.35rem;
+    z-index: 1000;
+    animation: dropdownFade 0.15s ease;
+}
+
+.item-dropdown-btn {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.6rem !important;
+    width: 100% !important;
+    text-align: left !important;
+    background: transparent !important;
+    border: none !important;
+    color: #E56B6B !important;
+    font-size: 0.85rem !important;
+    padding: 0.5rem 0.6rem !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    min-height: auto !important;
+    font-weight: 500 !important;
+    box-shadow: none !important;
+    font-family: inherit !important;
+    transition: background 0.15s ease !important;
+}
+
+.item-dropdown-btn:hover {
+    background: rgba(229, 107, 107, 0.12) !important;
+}
+
 /* Mobile tweaks */
 @media (max-width: 600px) {
     body { padding: 1rem 0.5rem; }
