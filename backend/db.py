@@ -63,13 +63,15 @@ class JobStore:
             if "user_id" not in cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN user_id TEXT DEFAULT 'elena'")
                 conn.execute("UPDATE jobs SET user_id = 'elena' WHERE user_id IS NULL")
+            if "status" not in cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN status TEXT")
+            if "aai_transcript_id" not in cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN aai_transcript_id TEXT")
 
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_aai_id ON jobs(aai_transcript_id)")
 
     @contextmanager
     def _conn(self):
@@ -85,7 +87,7 @@ class JobStore:
             conn.close()
 
     def get(self, job_id: str, default=None):
-        with self._lock, self._conn() as conn:
+        with self._conn() as conn:
             row = conn.execute(
                 "SELECT data FROM jobs WHERE id = ?", (job_id,)
             ).fetchone()
@@ -107,21 +109,26 @@ class JobStore:
         payload = json.dumps(data, ensure_ascii=False, default=str)
         ts = int(time.time())
         user_id = data.get("user_id", DEFAULT_USER)
+        status = data.get("status")
+        aai_transcript_id = data.get("aai_transcript_id")
+        
         with self._lock, self._conn() as conn:
             conn.execute(
-                """INSERT INTO jobs (id, data, updated_at, user_id) VALUES (?, ?, ?, ?)
+                """INSERT INTO jobs (id, data, updated_at, user_id, status, aai_transcript_id) VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(id) DO UPDATE SET
                        data = excluded.data,
                        updated_at = excluded.updated_at,
-                       user_id = COALESCE(excluded.user_id, jobs.user_id)""",
-                (job_id, payload, ts, user_id),
+                       user_id = COALESCE(excluded.user_id, jobs.user_id),
+                       status = excluded.status,
+                       aai_transcript_id = excluded.aai_transcript_id""",
+                (job_id, payload, ts, user_id, status, aai_transcript_id),
             )
 
     def __contains__(self, job_id: str) -> bool:
         return self.get(job_id) is not None
 
     def __len__(self) -> int:
-        with self._lock, self._conn() as conn:
+        with self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
     def delete(self, job_id: str) -> bool:
@@ -143,37 +150,37 @@ class JobStore:
     def get_by_aai_id(self, key_or_aai_id: str) -> tuple[Optional[str], Optional[dict]]:
         """Find job by primary job_id or embedded aai_transcript_id.
         Returns (job_id, job_data) or (None, None)."""
-        with self._lock, self._conn() as conn:
-            row = conn.execute("SELECT id, data FROM jobs WHERE id = ?", (key_or_aai_id,)).fetchone()
+        with self._conn() as conn:
+            # Check aai_transcript_id column first (fast indexed lookup)
+            row = conn.execute("SELECT id, data FROM jobs WHERE aai_transcript_id = ?", (key_or_aai_id,)).fetchone()
             if row:
                 try:
                     return row[0], json.loads(row[1])
                 except Exception:
-                    return None, None
+                    pass
 
-            rows = conn.execute("SELECT id, data FROM jobs WHERE data LIKE ?", (f'%"{key_or_aai_id}"%',)).fetchall()
-            for r_id, r_data in rows:
+            # Fallback to checking primary id
+            row = conn.execute("SELECT data FROM jobs WHERE id = ?", (key_or_aai_id,)).fetchone()
+            if row:
                 try:
-                    d = json.loads(r_data)
-                    if d.get("aai_transcript_id") == key_or_aai_id:
-                        return r_id, d
+                    return key_or_aai_id, json.loads(row[0])
                 except Exception:
-                    continue
+                    pass
         return None, None
 
     def get_pending_jobs(self) -> list[dict]:
         """Fetch all jobs currently in 'processing' status."""
-        with self._lock, self._conn() as conn:
+        with self._conn() as conn:
             rows = conn.execute(
-                "SELECT id, data FROM jobs WHERE data LIKE '%\"status\": \"processing\"%'"
+                "SELECT id, data FROM jobs WHERE status = 'processing'"
             ).fetchall()
+        
         results = []
         for job_id, data_str in rows:
             try:
                 data = json.loads(data_str)
-                if data.get("status") == "processing":
-                    data["id"] = job_id
-                    results.append(data)
+                data["id"] = job_id
+                results.append(data)
             except Exception:
                 continue
         return results
