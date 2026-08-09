@@ -109,10 +109,8 @@ class JobStore:
             cur = conn.execute("DELETE FROM jobs WHERE updated_at < ?", (cutoff,))
             deleted = cur.rowcount
 
-        # Clean locks for jobs no longer in DB
-        for k in list(locks.keys()):
-            if k not in self:
-                locks.pop(k, None)
+        # Clean locks for jobs that are unlocked or no longer in DB
+        cleanup_unused_locks()
 
         return deleted
 
@@ -203,10 +201,30 @@ class JobStore:
 jobs = JobStore(DB_PATH)
 log.info(f"JobStore initialised at {DB_PATH} ({len(jobs)} existing entries)")
 
+_locks_guard = threading.Lock()
 locks: dict[str, asyncio.Lock] = {}
 
 
 def get_lock(job_id: str) -> asyncio.Lock:
-    if job_id not in locks:
-        locks[job_id] = asyncio.Lock()
-    return locks[job_id]
+    """Get or create an asyncio.Lock for a job in a thread-safe manner."""
+    with _locks_guard:
+        if job_id not in locks:
+            locks[job_id] = asyncio.Lock()
+        return locks[job_id]
+
+
+def remove_lock(job_id: str):
+    """Safely remove a job's lock from memory if it is unlocked."""
+    with _locks_guard:
+        lock = locks.get(job_id)
+        if lock and not lock.locked():
+            locks.pop(job_id, None)
+
+
+def cleanup_unused_locks():
+    """Remove locks for jobs that are unlocked."""
+    with _locks_guard:
+        for k in list(locks.keys()):
+            lock = locks[k]
+            if not lock.locked():
+                locks.pop(k, None)

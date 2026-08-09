@@ -146,3 +146,18 @@ def test_async_retry_helper():
     assert attempts == 2
 
 
+def test_lock_memory_cleanup():
+    from backend.db import cleanup_unused_locks, get_lock, locks, remove_lock
+
+    get_lock("job-test-lock-1")
+    assert "job-test-lock-1" in locks
+
+    remove_lock("job-test-lock-1")
+    assert "job-test-lock-1" not in locks
+
+    get_lock("job-test-lock-2")
+    assert "job-test-lock-2" in locks
+    cleanup_unused_locks()
+    assert "job-test-lock-2" not in locks
+
+
