@@ -39,8 +39,8 @@ from backend.config import (
     MODEL,
     OPENROUTER_KEY,
     STATIC_DIR,
-    SYSTEM_PROMPT,
     WEBHOOK_SECRET,
+    get_system_prompt,
     log,
 )
 from backend.db import get_lock, jobs, user_store
@@ -168,7 +168,7 @@ async def health():
         "has_assemblyai_key": bool(ASSEMBLYAI_KEY),
         "has_openrouter_key": bool(OPENROUTER_KEY),
         "webhook_configured": bool(BASE_URL and WEBHOOK_SECRET),
-        "system_prompt_loaded": bool(SYSTEM_PROMPT),
+        "system_prompt_loaded": bool(get_system_prompt()),
         "auth_enabled": bool(AUTH_USERNAME and AUTH_PASSWORD),
         "active_jobs": len(jobs),
     }

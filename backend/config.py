@@ -65,15 +65,30 @@ for name, val in [
 if not BASE_URL:
     log.warning("BASE_URL not set — AssemblyAI webhooks disabled, /status will poll instead")
 
-SYSTEM_PROMPT = ""
-if SYSTEM_PROMPT_PATH.exists():
-    SYSTEM_PROMPT = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-    log.info(f"Loaded system prompt: {len(SYSTEM_PROMPT)} chars from {SYSTEM_PROMPT_PATH}")
-elif SYSTEM_PROMPT_EXAMPLE_PATH.exists():
-    SYSTEM_PROMPT = SYSTEM_PROMPT_EXAMPLE_PATH.read_text(encoding="utf-8")
-    log.info(f"Loaded example system prompt: {len(SYSTEM_PROMPT)} chars from {SYSTEM_PROMPT_EXAMPLE_PATH}")
-else:
-    log.error(f"System prompt not found at {SYSTEM_PROMPT_PATH} or {SYSTEM_PROMPT_EXAMPLE_PATH}")
+_cached_prompt = ""
+_cached_prompt_mtime = 0.0
+
+def get_system_prompt() -> str:
+    global _cached_prompt, _cached_prompt_mtime
+    
+    path_to_check = SYSTEM_PROMPT_PATH if SYSTEM_PROMPT_PATH.exists() else SYSTEM_PROMPT_EXAMPLE_PATH
+    if not path_to_check.exists():
+        log.error(f"System prompt not found at {SYSTEM_PROMPT_PATH} or {SYSTEM_PROMPT_EXAMPLE_PATH}")
+        return ""
+        
+    try:
+        mtime = path_to_check.stat().st_mtime
+        if mtime > _cached_prompt_mtime:
+            _cached_prompt = path_to_check.read_text(encoding="utf-8")
+            _cached_prompt_mtime = mtime
+            log.info(f"Loaded/Reloaded system prompt: {len(_cached_prompt)} chars from {path_to_check}")
+    except Exception as e:
+        log.error(f"Error reading system prompt: {e}")
+        
+    return _cached_prompt
+
+# Initial load on startup
+get_system_prompt()
 
 
 WORD_BOOST = [
