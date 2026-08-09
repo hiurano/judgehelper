@@ -1,4 +1,4 @@
-# JudgeHelper
+# JudgeHelper [![CI Test Suite](https://github.com/ame-natsu/judge-helper/actions/workflows/ci.yml/badge.svg)](https://github.com/ame-natsu/judge-helper/actions/workflows/ci.yml)
 
 Веб-сервис автоматического распознавания устной речи и генерации официальных судебных протоколов по стандарту Нижневартовского городского суда ХМАО-Югры.
 
