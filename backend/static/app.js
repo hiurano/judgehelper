@@ -896,14 +896,14 @@ function renderHistory() {
 
             if (isHidden) {
                 dropdownMenu.hidden = false;
+                dropdownMenu.style.left = '-9999px';
+                dropdownMenu.style.top = '-9999px';
                 document.body.appendChild(dropdownMenu);
                 
-                // Position it relative to the button
                 const rect = dotsBtn.getBoundingClientRect();
-                dropdownMenu.style.top = `${rect.bottom + window.scrollY + 6}px`;
+                const dpWidth = dropdownMenu.offsetWidth || 140;
                 
-                // Make sure we have offsetWidth by temporarily making it visible if it was display:none
-                const dpWidth = dropdownMenu.offsetWidth || 130;
+                dropdownMenu.style.top = `${rect.bottom + window.scrollY + 6}px`;
                 dropdownMenu.style.left = `${rect.right + window.scrollX - dpWidth}px`;
             }
         });
