@@ -199,7 +199,7 @@ async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_p
             is_completed = False
 
             for loop_idx in range(5):
-                async def _do_llm_call():
+                async def _do_llm_call(current_messages):
                     llm_resp = await client.post(
                         "https://openrouter.ai/api/v1/chat/completions",
                         headers={
@@ -212,18 +212,15 @@ async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_p
                             "model": model,
                             "max_tokens": 16000,
                             "temperature": 0.3,
-                            "messages": messages,
+                            "messages": current_messages,
                         },
                     )
                     if llm_resp.status_code != 200:
                         raise RuntimeError(f"HTTP {llm_resp.status_code}: {llm_resp.text[:300]}")
                     return llm_resp
 
-                llm_resp = await async_retry(_do_llm_call, retries=4, delay=1.5, backoff=2.0)
-                if llm_resp.status_code != 200:
-                    last_error = f"{model}: HTTP {llm_resp.status_code}: {llm_resp.text[:300]}"
-                    log.warning(f"[{log_prefix}] {last_error}; trying next model")
-                    break  # Break out of loop_idx, go to next model
+                # We use a lambda to cleanly pass the current state of messages
+                llm_resp = await async_retry(lambda: _do_llm_call(messages), retries=4, delay=1.5, backoff=2.0)
 
                 llm_data = llm_resp.json()
 
