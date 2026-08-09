@@ -886,15 +886,32 @@ function renderHistory() {
 
         dotsBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const isHidden = dropdownMenu.hidden;
-            document.querySelectorAll('.item-dropdown').forEach(d => d.hidden = true);
-            dropdownMenu.hidden = !isHidden;
+            const isHidden = dropdownMenu.parentElement !== document.body;
+            
+            // Clean up any previously opened dropdowns
+            document.querySelectorAll('.item-dropdown').forEach(d => {
+                d.hidden = true;
+                if (d.parentElement === document.body) document.body.removeChild(d);
+            });
+
+            if (isHidden) {
+                dropdownMenu.hidden = false;
+                document.body.appendChild(dropdownMenu);
+                
+                // Position it relative to the button
+                const rect = dotsBtn.getBoundingClientRect();
+                dropdownMenu.style.top = `${rect.bottom + window.scrollY + 6}px`;
+                
+                // Make sure we have offsetWidth by temporarily making it visible if it was display:none
+                const dpWidth = dropdownMenu.offsetWidth || 130;
+                dropdownMenu.style.left = `${rect.right + window.scrollX - dpWidth}px`;
+            }
         });
 
+        // We append the menu items to the dropdown, but do NOT append the dropdown to menuWrapper yet.
         dropdownMenu.appendChild(dlItemBtn);
         dropdownMenu.appendChild(delItemBtn);
         menuWrapper.appendChild(dotsBtn);
-        menuWrapper.appendChild(dropdownMenu);
 
         itemEl.appendChild(contentEl);
         itemEl.appendChild(menuWrapper);
@@ -986,8 +1003,18 @@ fetchUserProfile();
 initProfileDropdown();
 
 document.addEventListener('click', () => {
-    document.querySelectorAll('.item-dropdown').forEach(d => d.hidden = true);
+    document.querySelectorAll('.item-dropdown').forEach(d => {
+        d.hidden = true;
+        if (d.parentElement === document.body) document.body.removeChild(d);
+    });
 });
+
+window.addEventListener('scroll', () => {
+    document.querySelectorAll('.item-dropdown').forEach(d => {
+        d.hidden = true;
+        if (d.parentElement === document.body) document.body.removeChild(d);
+    });
+}, { capture: true });
 
 // Re-check jobs immediately on tab activation / unlock / online
 document.addEventListener('visibilitychange', () => {
