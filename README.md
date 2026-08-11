@@ -1,4 +1,4 @@
-# JudgeHelper [![CI Test Suite](https://github.com/ame-natsu/judge-helper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ame-natsu/judge-helper/actions/workflows/ci.yml)
+# JudgeHelper [![CI Test Suite](https://github.com/mineneuryuu9/judge-helper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mineneuryuu9/judge-helper/actions/workflows/ci.yml)
 
 Веб-сервис автоматического распознавания устной речи и генерации официальных судебных протоколов по стандарту Нижневартовского городского суда ХМАО-Югры.
 
@@ -18,7 +18,7 @@
 - **Сетевая устойчивость (Async Retry):** Повторные попытки с экспоненциальной задержкой (Exponential Backoff) для устранения кратковременных сбоев внешних API.
 - **Очередь и пакетная загрузка:** Поддержка последовательной обработки нескольких файлов с визуальным отслеживанием прогресса и расчётом оставшегося времени (ETA).
 - **Zero-RAM архитектура:** Файлы любого размера стримятся на диск и в API без загрузки в оперативную память, полностью устраняя риски OOM (Out Of Memory).
-- **Отказоустойчивость LLM:** Каскадная цепочка резервных моделей (DeepSeek / OpenAI / Gemini / Claude) с автоматическим переключением при сбоях основной модели. Использование "окна памяти" для удержания ролей спикеров в длинных многочасовых аудио.
+- **Отказоустойчивость LLM:** Каскадная цепочка резервных моделей (OpenAI / Gemini / Claude) с автоматическим переключением при сбоях основной модели. Использование "окна памяти" для удержания ролей спикеров в длинных многочасовых аудио.
 - **Самовосстановление (Self-Healing):** Автоматическое восстановление незавершённых фоновых задач при перезапуске сервера через гибридный механизм пуш-вебхуков и резервного фонового поллинга.
 - **Форматирование по судебному стандарту:** Динамическая генерация документов Word (Times New Roman 12pt, красные строки 1.25 см, поля, табуляция подписей и дат по правому краю 16.5 см).
 - **Авторизация и безопасность:** Встроенная cookie-авторизация на базе HMAC-токенов (`SECRET_KEY`) и локальная база аккаунтов (SQLite) с CLI-утилитой для управления.
@@ -31,7 +31,7 @@
 ## Технологический стек
 
 - **Backend:** Python 3.11+, FastAPI, Uvicorn, SQLite3, `httpx`, `python-docx`
-- **AI Services:** AssemblyAI (Speech-to-Text), OpenRouter (LLM DeepSeek / Gemini / OpenAI)
+- **AI Services:** AssemblyAI (Speech-to-Text), OpenRouter (LLM OpenAI / Gemini / Claude)
 - **Frontend:** HTML5, CSS3 (Noctalia Monochrome), Vanilla JavaScript, PWA
 - **Инфраструктура & CI/CD:** GitHub Actions CI, Docker, Docker Compose, Caddy (Reverse Proxy & Auto-HTTPS)
 
@@ -47,7 +47,7 @@ ASSEMBLYAI_API_KEY=your_assemblyai_key
 OPENROUTER_API_KEY=your_openrouter_key
 
 # Настройки LLM
-LLM_MODEL=deepseek/deepseek-v4-flash-0731
+LLM_MODEL=openai/gpt-4o-mini
 
 # Сетевые настройки и вебхуки
 CADDY_DOMAIN=your-domain.sslip.io
@@ -63,7 +63,7 @@ SECRET_KEY=your_random_secret_key
 # Настройки базы данных и хранения
 JOB_TTL_DAYS=30
 DB_PATH=backend/data/jobs.db
-DEFAULT_USER=elena
+DEFAULT_USER=test
 ```
 
 ---
@@ -89,23 +89,23 @@ DEFAULT_USER=elena
 ## Управление пользователями (CLI)
 
 Аккаунты хранятся в базе данных SQLite (хеши паролей salted SHA-256). Управлять ими можно без перезапуска сервера через CLI-утилиту.
-Если приложение запущено через Docker, выполняйте команды внутри контейнера `backend`:
+Если приложение запущено через Docker, выполняйте команды внутри контейнера `judge-helper`:
 
 ```bash
 # Список всех пользователей
-docker compose exec backend python -m backend.cli list-users
+docker compose exec judge-helper python -m backend.cli list-users
 
 # Создать нового пользователя
-docker compose exec backend python -m backend.cli add-user username "password123" --display-name "Имя"
+docker compose exec judge-helper python -m backend.cli add-user username "password123" --display-name "Имя"
 
 # Сменить пароль
-docker compose exec backend python -m backend.cli change-password username "new_password"
+docker compose exec judge-helper python -m backend.cli change-password username "new_password"
 
 # Удалить пользователя
-docker compose exec backend python -m backend.cli delete-user username
+docker compose exec judge-helper python -m backend.cli delete-user username
 ```
 
-*При локальном запуске (без Docker) просто опускайте `docker compose exec backend`.*
+*При локальном запуске (без Docker) просто опускайте `docker compose exec judge-helper`.*
 
 ---
 
