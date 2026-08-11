@@ -206,7 +206,7 @@ async def call_llm_with_fallback(client: httpx.AsyncClient, user_msg: str, log_p
                         headers={
                             "Authorization": f"Bearer {OPENROUTER_KEY}",
                             "Content-Type": "application/json",
-                            "HTTP-Referer": "https://github.com/mineneuryuu9/judge-helper",
+                            "HTTP-Referer": "https://github.com/hiurano/judge-helper",
                             "X-Title": "Judge Helper",
                         },
                         json={
