@@ -35,12 +35,12 @@
                 <h1 style="margin:0">Помощник секретаря</h1>
             </div>
             <div style="display:flex;gap:0.5rem;flex-shrink:0;position:relative;align-items:center">
-                <button class="avatar-circle-btn" id="avatar-btn" title="Профиль аккаунта">E</button>
+                <button class="avatar-circle-btn" id="avatar-btn" title="Профиль аккаунта">П</button>
 
                 <div class="profile-dropdown" id="profile-dropdown" hidden>
                     <div class="dropdown-header">
                         <div class="dropdown-user-info">
-                            <div class="dropdown-name" id="dropdown-user-name">Elena</div>
+                            <div class="dropdown-name" id="dropdown-user-name">Пользователь</div>
                             <div class="dropdown-plan" id="dropdown-user-plan">Персональный доступ</div>
                         </div>
                     </div>
@@ -83,8 +83,17 @@
                         <p class="hint">mp3 · wav · m4a · mp4 · ogg · webm</p>
                         <input type="file" id="file-input" accept="audio/*,video/mp4,.m4a,.webm" multiple>
                     </div>
-                    <div class="row">
+                    <div class="row" id="default-actions">
+                        <button id="record-btn" class="secondary big">🎙 Записать аудио</button>
                         <button id="pick-btn" class="secondary big">Выбрать файл(ы)</button>
+                    </div>
+                    <div class="recording-ui-wrap" id="recording-ui" hidden>
+                        <div class="recording-status">
+                            <div class="recording-indicator"></div>
+                            <div class="recording-timer" id="recording-timer">00:00:00</div>
+                        </div>
+                        <button id="stop-record-btn" class="secondary big recording-stop-btn">Остановить запись</button>
+                        <div class="recording-warning">Держите вкладку открытой во время записи</div>
                     </div>
                 </div>
 
