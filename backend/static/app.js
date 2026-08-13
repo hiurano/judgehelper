@@ -997,6 +997,148 @@ function initProfileDropdown() {
     }
 }
 
+// =========================================================================
+// Dictaphone & IndexedDB Autosave
+// =========================================================================
+let mediaRecorder = null;
+let audioChunks = [];
+let recordingInterval = null;
+let recordingStartTime = 0;
+let db = null;
+let isRecording = false;
+
+// Initialize IndexedDB
+const requestDB = indexedDB.open('DictaphoneDB', 1);
+requestDB.onupgradeneeded = (e) => {
+    db = e.target.result;
+    if (!db.objectStoreNames.contains('chunks')) {
+        db.createObjectStore('chunks', { autoIncrement: true });
+    }
+};
+requestDB.onsuccess = (e) => {
+    db = e.target.result;
+    checkOrphanedRecording();
+};
+requestDB.onerror = (e) => console.warn('IndexedDB error:', e);
+
+function clearChunksDB() {
+    if (!db) return;
+    const tx = db.transaction('chunks', 'readwrite');
+    tx.objectStore('chunks').clear();
+}
+
+function saveChunkToDB(blob) {
+    if (!db) return;
+    const tx = db.transaction('chunks', 'readwrite');
+    tx.objectStore('chunks').add(blob);
+}
+
+function checkOrphanedRecording() {
+    if (!db) return;
+    const tx = db.transaction('chunks', 'readonly');
+    const store = tx.objectStore('chunks');
+    const getReq = store.getAll();
+    getReq.onsuccess = () => {
+        if (getReq.result && getReq.result.length > 0) {
+            console.log('Found orphaned recording chunks, recovering...');
+            const recoveredBlob = new Blob(getReq.result, { type: 'audio/webm' });
+            const recoveredFile = new File([recoveredBlob], `Восстановленная_запись_${new Date().toISOString().slice(0,10)}.webm`, { type: 'audio/webm' });
+            addFilesToQueue([recoveredFile]);
+            clearChunksDB();
+        }
+    };
+}
+
+function updateRecordingTimer() {
+    const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+    const h = Math.floor(elapsed / 3600);
+    const m = Math.floor((elapsed % 3600) / 60);
+    const s = elapsed % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    const timerEl = $('recording-timer');
+    if (timerEl) timerEl.textContent = h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `00:${pad(m)}:${pad(s)}`;
+}
+
+async function startRecording() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+        clearChunksDB();
+
+        mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+                audioChunks.push(e.data);
+                saveChunkToDB(e.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            clearInterval(recordingInterval);
+            isRecording = false;
+            releaseWakeLock();
+            stream.getTracks().forEach(t => t.stop());
+            
+            const defActions = $('default-actions');
+            const recUI = $('recording-ui');
+            if (defActions) defActions.hidden = false;
+            if (recUI) recUI.hidden = true;
+            
+            const timerEl = $('recording-timer');
+            if (timerEl) timerEl.textContent = '00:00:00';
+
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            const dateStr = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
+            const file = new File([audioBlob], `Запись_${dateStr}.webm`, { type: 'audio/webm' });
+            addFilesToQueue([file]);
+            clearChunksDB();
+        };
+
+        mediaRecorder.start(1000); // chunk every 1 second
+        isRecording = true;
+        recordingStartTime = Date.now();
+        updateRecordingTimer();
+        recordingInterval = setInterval(updateRecordingTimer, 1000);
+        
+        acquireWakeLock();
+        
+        const defActions = $('default-actions');
+        const recUI = $('recording-ui');
+        if (defActions) defActions.hidden = true;
+        if (recUI) recUI.hidden = false;
+        
+    } catch (err) {
+        alert('Не удалось получить доступ к микрофону. Разрешите доступ в настройках браузера.');
+        console.error('Microphone error:', err);
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+}
+
+const recordBtn = $('record-btn');
+const stopRecordBtn = $('stop-record-btn');
+if (recordBtn) recordBtn.addEventListener('click', startRecording);
+if (stopRecordBtn) stopRecordBtn.addEventListener('click', stopRecording);
+
+window.addEventListener('beforeunload', (e) => {
+    if (isRecording) {
+        e.preventDefault();
+        e.returnValue = 'Запись прервется. Вы уверены?';
+    }
+});
+
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden && isRecording) {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.requestData();
+        }
+    }
+});
+
 // Initial load on page startup
 loadHistoryJobs();
 fetchUserProfile();

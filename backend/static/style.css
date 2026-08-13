@@ -737,6 +737,66 @@ button.history-dots-btn:hover {
     background: rgba(229, 107, 107, 0.12) !important;
 }
 
+/* Recording UI */
+.recording-ui-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    background: var(--bg-deep);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+}
+
+.recording-status {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.recording-indicator {
+    width: 12px;
+    height: 12px;
+    background-color: #E56B6B;
+    border-radius: 50%;
+    box-shadow: 0 0 10px rgba(229, 107, 107, 0.6);
+    animation: recordingPulse 1.5s infinite ease-in-out;
+}
+
+@keyframes recordingPulse {
+    0% { transform: scale(0.95); opacity: 0.75; box-shadow: 0 0 4px rgba(229, 107, 107, 0.6); }
+    50% { transform: scale(1.1); opacity: 1; box-shadow: 0 0 12px rgba(229, 107, 107, 0.8); }
+    100% { transform: scale(0.95); opacity: 0.75; box-shadow: 0 0 4px rgba(229, 107, 107, 0.6); }
+}
+
+.recording-timer {
+    font-family: var(--font-mono);
+    font-size: 2.25rem;
+    font-weight: 700;
+    color: var(--text-main);
+    letter-spacing: 2px;
+}
+
+.recording-stop-btn {
+    width: 100%;
+    color: #E56B6B !important;
+    border-color: rgba(229, 107, 107, 0.3) !important;
+}
+
+.recording-stop-btn:hover {
+    background: rgba(229, 107, 107, 0.1) !important;
+    border-color: #E56B6B !important;
+}
+
+.recording-warning {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
 /* Mobile tweaks */
 @media (max-width: 600px) {
     body { padding: 1rem 0.5rem; }
