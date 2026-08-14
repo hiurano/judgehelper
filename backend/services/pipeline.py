@@ -72,25 +72,35 @@ async def process_transcript(job_id: str):
                 else:
                     formatted = transcript.get("text", "")
 
+                speakers = set(u.get("speaker") for u in utterances if u.get("speaker"))
+                speakers_count = len(speakers) if speakers else (1 if utterances else 0)
+                utterances_count = len(utterances)
                 formatted = clean_transcript(formatted)
                 duration_min = round((audio_duration_sec or 0) / 60, 1)
 
                 log.info(
                     f"Transcript {job_id}: {duration_min} min, "
-                    f"{len(utterances)} utterances, {len(formatted)} chars. Calling LLM..."
+                    f"{utterances_count} utterances, {speakers_count} speakers, {len(formatted)} chars. Calling LLM..."
                 )
+
+                meta_block = format_metadata_block(metadata)
+                chunks = split_transcript_into_chunks(formatted, max_chunk_chars=12000)
+                total_chunks = len(chunks)
 
                 drafting_started_at = int(time.time())
                 existing.update({
                     "status": "processing",
                     "phase": "drafting",
                     "audio_duration_sec": audio_duration_sec,
+                    "duration_min": duration_min,
+                    "speakers_count": speakers_count,
+                    "utterances_count": utterances_count,
+                    "total_chunks": total_chunks,
+                    "current_chunk": 1,
                     "drafting_started_at": drafting_started_at,
+                    "phase_detail": f"Составление протокола нейросетью (часть 1 из {total_chunks})..." if total_chunks > 1 else "Составление протокола нейросетью...",
                 })
                 jobs[job_id] = existing
-
-                meta_block = format_metadata_block(metadata)
-                chunks = split_transcript_into_chunks(formatted, max_chunk_chars=12000)
 
                 if len(chunks) == 1:
                     user_msg = (
@@ -111,6 +121,13 @@ async def process_transcript(job_id: str):
                     last_context = ""
 
                     for idx, chunk_text in enumerate(chunks):
+                        existing_chunk = jobs.get(job_id, {})
+                        existing_chunk.update({
+                            "current_chunk": idx + 1,
+                            "total_chunks": total_chunks,
+                            "phase_detail": f"Составление протокола нейросетью (часть {idx + 1} из {total_chunks})...",
+                        })
+                        jobs[job_id] = existing_chunk
                         if idx == 0:
                             prompt = (
                                 f"{meta_block}"
@@ -175,14 +192,21 @@ async def process_transcript(job_id: str):
                     f"chunks={len(chunks)}, in={usage.get('prompt_tokens')} out={usage.get('completion_tokens')})"
                 )
 
-                existing.update({
+                existing_done = jobs.get(job_id, {})
+                existing_done.update({
                     "status": "done",
                     "draft": draft,
                     "transcript": formatted,
                     "duration_min": duration_min,
+                    "speakers_count": speakers_count,
+                    "utterances_count": utterances_count,
+                    "total_chunks": total_chunks,
+                    "current_chunk": total_chunks,
                     "model": used_model,
+                    "phase": "done",
+                    "phase_detail": "Протокол сформирован",
                 })
-                jobs[job_id] = existing
+                jobs[job_id] = existing_done
             except Exception as e:
                 log.exception(f"Processing failed for {job_id}")
                 existing.update({

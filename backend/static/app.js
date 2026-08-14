@@ -170,9 +170,14 @@ function pollQueueItem(item) {
             if (data.status === 'done') {
                 if (item.pollTimer) clearInterval(item.pollTimer);
                 item.status = 'done';
+                item.phase = 'done';
                 item.draft = data.draft;
                 item.transcript = data.transcript;
                 item.duration_min = data.duration_min;
+                item.speakers_count = data.speakers_count;
+                item.utterances_count = data.utterances_count;
+                item.total_chunks = data.total_chunks;
+                item.current_chunk = data.current_chunk;
                 item.model = data.model;
                 item.timestamp = new Date().toISOString();
                 renderQueue();
@@ -189,6 +194,12 @@ function pollQueueItem(item) {
                 releaseWakeLockIfDone();
             } else {
                 item.phase = data.phase || 'processing';
+                if (data.phase_detail)        item.phase_detail = data.phase_detail;
+                if (data.speakers_count)      item.speakers_count = data.speakers_count;
+                if (data.utterances_count)    item.utterances_count = data.utterances_count;
+                if (data.total_chunks)        item.total_chunks = data.total_chunks;
+                if (data.current_chunk)       item.current_chunk = data.current_chunk;
+                if (data.duration_min)        item.duration_min = data.duration_min;
                 if (data.created_at)          item.created_at = data.created_at;
                 if (data.aai_started_at)      item.aai_started_at = data.aai_started_at;
                 if (data.drafting_started_at) item.drafting_started_at = data.drafting_started_at;
@@ -267,194 +278,126 @@ function uploadFile(item) {
 }
 
 // =========================================================================
-// Queue rendering & ETA calculations
+// Queue rendering & Step-by-Step Live Log
 // =========================================================================
-function estimateTranscribing(item) {
-    const nowSec = Date.now() / 1000;
-    const startSec = item.aai_started_at || item.created_at || (item.pollStart ? item.pollStart / 1000 : nowSec);
-    const elapsedSec = Math.max(0, Math.round(nowSec - startSec));
-
-    let audioSec = item.audio_duration_sec;
-    if (!audioSec && item.sizeMB && item.sizeMB !== '—') {
-        const mb = parseFloat(item.sizeMB);
-        if (!isNaN(mb) && mb > 0) {
-            audioSec = mb * 120;
-        }
-    }
-
-    const estimatedSec = audioSec ? Math.max(30, Math.round(audioSec * 0.25)) : 180;
-
-    let pct = 0;
-    if (elapsedSec <= estimatedSec) {
-        pct = Math.max(5, Math.round((elapsedSec / estimatedSec) * 90));
-    } else {
-        const overtime = elapsedSec - estimatedSec;
-        const extra = 9 * (1 - Math.exp(-overtime / (estimatedSec * 0.5 || 60)));
-        pct = Math.min(99, Math.round(90 + extra));
-    }
-    return { elapsedSec, estimatedSec, pct, isOvertime: elapsedSec > estimatedSec };
-}
-
-function phaseElapsedSec(item) {
-    const nowSec = Date.now() / 1000;
-    let startSec = null;
-    if (item.phase === 'transcribing' && item.aai_started_at) startSec = item.aai_started_at;
-    else if (item.phase === 'drafting' && item.drafting_started_at) startSec = item.drafting_started_at;
-    else if (item.created_at) startSec = item.created_at;
-    if (startSec != null) return Math.max(0, Math.round(nowSec - startSec));
-    return item.pollStart ? Math.round((Date.now() - item.pollStart) / 1000) : 0;
-}
 
 function renderQueue() {
     const list = $('queue-list');
     if (!list) return;
     list.innerHTML = '';
+
+    const doneCnt = queue.filter((q) => q.status === 'done').length;
+    const errCnt  = queue.filter((q) => q.status === 'error').length;
+    const staged = queue.filter((q) => q.status === 'staged');
+    const inProgCnt = queue.length - doneCnt - errCnt - staged.length;
+
     if (queue.length === 0) {
         $('queue-title').textContent = 'Очередь пуста';
+    } else if (staged.length > 0 && inProgCnt === 0 && doneCnt === 0 && errCnt === 0) {
+        $('queue-title').textContent = staged.length > 1 ? 'Выбранные файлы' : 'Выбранный файл';
+    } else if (errCnt > 0 && inProgCnt === 0 && staged.length === 0 && doneCnt === 0) {
+        $('queue-title').textContent = 'Ошибка обработки';
     } else {
-        const doneCnt = queue.filter((q) => q.status === 'done').length;
-        const errCnt  = queue.filter((q) => q.status === 'error').length;
-        const stagedCnt = queue.filter((q) => q.status === 'staged').length;
-        const inProgCnt = queue.length - doneCnt - errCnt - stagedCnt;
-
-        if (stagedCnt > 0 && inProgCnt === 0 && doneCnt === 0 && errCnt === 0) {
-            $('queue-title').textContent = stagedCnt > 1 ? 'Выбранные файлы' : 'Выбранный файл';
-        } else if (errCnt > 0 && inProgCnt === 0 && stagedCnt === 0 && doneCnt === 0) {
-            $('queue-title').textContent = 'Ошибка обработки';
-        } else {
-            const parts = [];
-            if (stagedCnt) parts.push(`${stagedCnt} ожидает`);
-            if (inProgCnt) parts.push(`${inProgCnt} в работе`);
-            if (doneCnt)   parts.push(`${doneCnt} готово`);
-            if (errCnt)    parts.push(`${errCnt} ошибка`);
-            $('queue-title').textContent = parts.length ? `Обработка — ${parts.join(', ')}` : 'Обработка';
-        }
+        const parts = [];
+        if (staged.length) parts.push(`${staged.length} ожидает`);
+        if (inProgCnt)     parts.push(`${inProgCnt} в работе`);
+        if (doneCnt)       parts.push(`${doneCnt} готово`);
+        if (errCnt)        parts.push(`${errCnt} ошибка`);
+        $('queue-title').textContent = parts.length ? `Обработка — ${parts.join(', ')}` : 'Обработка';
     }
+
     for (const item of queue) {
         list.appendChild(renderQueueItem(item));
     }
-    renderStagedBar();
-}
 
-function renderStagedBar() {
-    let bar = $('staged-bar');
-    if (!bar) {
-        bar = document.createElement('div');
-        bar.id = 'staged-bar';
-        bar.style.cssText = 'display:flex; align-items:center; gap:1rem; flex-wrap:wrap';
-        const container = $('staged-bar-container') || $('queue-card');
-        if (container) container.appendChild(bar);
-    }
-    const staged = queue.filter((q) => q.status === 'staged');
-    if (staged.length < 1) {
-        bar.style.display = 'none';
-        return;
-    }
-    bar.style.display = 'flex';
-    bar.innerHTML = '';
-    const goBtn = document.createElement('button');
-    goBtn.className = 'big';
-    goBtn.textContent = staged.length > 1 ? 'Расшифровать всё' : 'Расшифровать';
-    goBtn.addEventListener('click', () => {
-        staged.forEach((s) => { s.status = 'queued'; });
-        renderQueue();
-        checkQueueScheduler();
-    });
-    bar.appendChild(goBtn);
-}
-
-function getOverallProgressInfo(item) {
-    let audioSec = item.audio_duration_sec;
-    if (!audioSec && item.sizeMB && item.sizeMB !== '—') {
-        const mb = parseFloat(item.sizeMB);
-        if (!isNaN(mb) && mb > 0) audioSec = mb * 120;
-    }
-    const totalEstSec = audioSec ? Math.max(45, Math.round(audioSec * 0.25 + 35)) : 180;
-    const totalElapsed = item.created_at ? Math.max(0, Math.round(Date.now() / 1000 - item.created_at)) : phaseElapsedSec(item);
-    const remainingSec = Math.max(0, totalEstSec - totalElapsed);
-    const timeStr = (totalElapsed < totalEstSec && remainingSec > 0)
-        ? `осталось ≈ ${formatHMS(remainingSec)}`
-        : `завершение… (${formatHMS(totalElapsed)})`;
-
-    if (item.status === 'uploading') {
-        const uploadPct = Math.min(99, item.progress || 0);
-        const overallPct = Math.max(3, Math.round(uploadPct * 0.15));
-        return {
-            stageText: 'Загрузка файла на сервер…',
-            timeText: timeStr,
-            pct: overallPct
-        };
-    }
-
-    if (item.status === 'processing') {
-        if (item.reconnecting) {
-            return {
-                stageText: 'Восстановление связи…',
-                timeText: timeStr,
-                pct: 50
-            };
-        }
-
-        if (item.phase === 'uploading_to_aai') {
-            return {
-                stageText: 'Передача в нейросеть…',
-                timeText: timeStr,
-                pct: 20
-            };
-        }
-
-        if (item.phase === 'transcribing') {
-            const est = estimateTranscribing(item);
-            let transPct = 40;
-            if (est) {
-                transPct = Math.round(25 + (est.pct * 0.55));
+    // Apple Style Grouped Toolbar
+    const toolbar = $('queue-toolbar');
+    if (toolbar) {
+        toolbar.style.display = queue.length > 0 ? 'flex' : 'none';
+        const startBtn = $('start-staged-btn');
+        if (startBtn) {
+            if (staged.length > 0) {
+                startBtn.style.display = 'inline-flex';
+                startBtn.textContent = staged.length > 1 ? 'Расшифровать всё' : 'Расшифровать';
+                startBtn.onclick = () => {
+                    staged.forEach((s) => { s.status = 'queued'; });
+                    renderQueue();
+                    checkQueueScheduler();
+                };
+            } else {
+                startBtn.style.display = 'none';
             }
-            return {
-                stageText: 'Расшифровка аудио…',
-                timeText: timeStr,
-                pct: transPct
-            };
         }
+    }
+}
 
-        if (item.phase === 'drafting') {
-            const draftElapsed = item.drafting_started_at
-                ? Math.round(Date.now() / 1000 - item.drafting_started_at)
-                : phaseElapsedSec(item);
-            const draftPct = Math.min(96, Math.round(80 + (draftElapsed / 40) * 16));
-            return {
-                stageText: 'Составление протокола нейросетью…',
-                timeText: timeStr,
-                pct: draftPct
-            };
+function getJobSteps(item) {
+    const isDone = item.status === 'done';
+    const isErr = item.status === 'error' || item.status === 'auth_required';
+    const phase = item.phase || '';
+
+    // Step 1: Загрузка файла
+    let s1 = { title: 'Загрузка файла', state: 'pending' };
+    if (item.status === 'uploading') {
+        s1.state = 'active';
+        s1.title = `Загрузка файла (${item.progress || 0}%)`;
+    } else if (item.status === 'processing' || isDone) {
+        s1.state = 'completed';
+    } else if (isErr && !item.jobId) {
+        s1.state = 'error';
+    }
+
+    // Step 2: Распознавание речи
+    let s2 = { title: 'Распознавание речи', state: 'pending' };
+    if (item.status === 'processing' && (phase === 'uploading_to_aai' || phase === 'transcribing')) {
+        s2.state = 'active';
+        s2.title = 'Распознавание речи...';
+    } else if ((item.status === 'processing' && phase === 'drafting') || isDone) {
+        s2.state = 'completed';
+        const dur = item.duration_min ? `${item.duration_min} мин` : '';
+        const spk = item.speakers_count ? `${item.speakers_count} спикеров` : '';
+        const meta = [dur, spk].filter(Boolean).join(', ');
+        s2.title = meta ? `Распознавание речи (${meta})` : 'Распознавание речи';
+    } else if (isErr && (phase === 'uploading_to_aai' || phase === 'transcribing')) {
+        s2.state = 'error';
+    }
+
+    // Step 3: Составление протокола
+    let s3 = { title: 'Составление протокола', state: 'pending' };
+    if (item.status === 'processing' && phase === 'drafting') {
+        s3.state = 'active';
+        if (item.total_chunks && item.total_chunks > 1) {
+            s3.title = `Составление протокола (часть ${item.current_chunk || 1} из ${item.total_chunks})...`;
+        } else {
+            s3.title = 'Составление протокола нейросетью...';
         }
-
-        return {
-            stageText: 'Обработка…',
-            timeText: timeStr,
-            pct: 50
-        };
+    } else if (isDone) {
+        s3.state = 'completed';
+        s3.title = 'Составление протокола';
+    } else if (isErr && phase === 'drafting') {
+        s3.state = 'error';
     }
 
-    if (item.status === 'done') {
-        return { stageText: `Готово · ${item.duration_min ?? '—'} мин`, timeText: '', pct: 100 };
+    // Step 4: Сборка документа Word
+    let s4 = { title: 'Сборка документа Word', state: 'pending' };
+    if (isDone) {
+        s4.state = 'completed';
     }
-    if (item.status === 'staged') {
-        return { stageText: 'Готов к обработке', timeText: '', pct: 0 };
-    }
-    if (item.status === 'error') {
-        return { stageText: 'Ошибка обработки', timeText: '', pct: 0 };
-    }
-    return { stageText: 'В очереди…', timeText: '', pct: 0 };
+
+    return [s1, s2, s3, s4];
 }
 
 function renderQueueItem(item) {
+    const isDone = item.status === 'done';
+    const isErr = item.status === 'error' || item.status === 'auth_required';
+    const isWorking = item.status === 'uploading' || item.status === 'processing';
+    const isStaged = item.status === 'staged';
+
     const wrap = document.createElement('div');
     wrap.setAttribute('data-key', item.key);
-    wrap.className = 'queue-item ' + (
-        item.status === 'done' ? 'done' :
-        (item.status === 'error' || item.status === 'auth_required') ? 'error' : ''
-    );
+    wrap.className = 'queue-item' + (isDone ? ' done' : isErr ? ' error' : '');
 
+    // Header line: File Name + Meta + Actions (Apple Style)
     const head = document.createElement('div');
     head.className = 'queue-item-head';
 
@@ -462,14 +405,44 @@ function renderQueueItem(item) {
     name.className = 'queue-name';
     name.textContent = item.filename;
     head.appendChild(name);
-    if (item.sizeMB && item.sizeMB !== '—') {
-        const size = document.createElement('span');
-        size.className = 'queue-size';
-        size.textContent = item.sizeMB + ' МБ';
-        head.appendChild(size);
+
+    // Meta (size + duration)
+    const metaSpan = document.createElement('span');
+    metaSpan.className = 'queue-size';
+    if (isDone && item.duration_min) {
+        metaSpan.textContent = `${item.sizeMB ? item.sizeMB + ' МБ · ' : ''}${item.duration_min} мин`;
+    } else if (item.sizeMB && item.sizeMB !== '—') {
+        metaSpan.textContent = `${item.sizeMB} МБ`;
     }
-    
-    if (item.status === 'staged' || item.status === 'error' || item.status === 'auth_required') {
+    head.appendChild(metaSpan);
+
+    // Header Right Actions:
+    if (isDone) {
+        // Native Apple Style Download Pill Button in Header
+        const dlBtn = document.createElement('button');
+        dlBtn.className = 'queue-download-pill';
+        dlBtn.title = 'Скачать протокол .docx';
+        dlBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg><span>Скачать .docx</span>';
+        dlBtn.addEventListener('click', async () => {
+            await downloadDocx(item.draft, makeFilename({
+                metadata: item.metadata,
+                timestamp: item.timestamp,
+                filename: item.filename,
+            }));
+        });
+        head.appendChild(dlBtn);
+    } else if (isWorking) {
+        // Live Stopwatch Badge
+        if (!item.clientStartTime) {
+            item.clientStartTime = item.created_at ? item.created_at * 1000 : Date.now();
+        }
+        const elapsed = Math.max(0, Math.floor((Date.now() - item.clientStartTime) / 1000));
+        const sw = document.createElement('div');
+        sw.className = 'stopwatch-badge';
+        sw.textContent = formatHMS(elapsed);
+        head.appendChild(sw);
+    } else if (isStaged || isErr) {
+        // Remove Button
         const rmBtn = document.createElement('button');
         rmBtn.className = 'queue-remove-btn';
         rmBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
@@ -481,74 +454,37 @@ function renderQueueItem(item) {
         });
         head.appendChild(rmBtn);
     }
-    
-    if (item.status === 'done') {
-        const btns = document.createElement('div');
-        btns.style.cssText = 'margin-left: auto; display: flex; gap: 0.5rem;';
-
-        const dlBtn = document.createElement('button');
-        dlBtn.className = 'small';
-        dlBtn.textContent = 'Скачать .docx';
-        dlBtn.addEventListener('click', async () => {
-            await downloadDocx(item.draft, makeFilename({
-                metadata: item.metadata,
-                timestamp: item.timestamp,
-                filename: item.filename,
-            }));
-        });
-        btns.appendChild(dlBtn);
-        head.appendChild(btns);
-    }
-    
     wrap.appendChild(head);
 
-    // Status row (Left: text, Right: remaining time)
-    const status = document.createElement('div');
-    status.className = 'queue-status';
-    status.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.875rem;';
+    // Flat Step Tracker (For working and done files)
+    if (isWorking || isDone) {
+        const stepList = document.createElement('div');
+        stepList.className = 'flat-step-list';
 
-    const info = getOverallProgressInfo(item);
-    const stageSpan = document.createElement('span');
-    stageSpan.className = 'queue-stage-text';
-    const timeSpan = document.createElement('span');
-    timeSpan.className = 'queue-time-text';
-    timeSpan.style.cssText = 'color: var(--text-muted); font-size: 0.825rem; white-space: nowrap;';
+        const steps = getJobSteps(item);
+        steps.forEach((step) => {
+            const row = document.createElement('div');
+            row.className = `flat-step-row ${step.state}`;
 
-    if (item.status === 'done') {
-        stageSpan.className = 'badge-done queue-stage-text';
-        stageSpan.innerHTML = `Готово · ${item.duration_min ?? '—'} мин · ${(item.draft?.length || 0).toLocaleString('ru')} символов`;
-    } else if (item.status === 'error') {
-        stageSpan.className = 'badge-error queue-stage-text';
-        stageSpan.textContent = 'Ошибка';
-    } else if (item.status === 'staged') {
-        stageSpan.style.color = 'var(--text-muted)';
-        stageSpan.textContent = 'Готов к обработке';
-    } else {
-        stageSpan.textContent = info.stageText;
-        timeSpan.textContent = info.timeText;
+            const icon = document.createElement('span');
+            icon.className = 'flat-step-icon';
+            icon.textContent = step.state === 'completed' ? '✓' :
+                               step.state === 'active' ? '●' :
+                               step.state === 'error' ? '✕' : '○';
+            row.appendChild(icon);
+
+            const label = document.createElement('span');
+            label.className = 'flat-step-text';
+            label.textContent = step.title;
+            row.appendChild(label);
+
+            stepList.appendChild(row);
+        });
+
+        wrap.appendChild(stepList);
     }
 
-    status.appendChild(stageSpan);
-    if (info.timeText && item.status !== 'done' && item.status !== 'error') {
-        status.appendChild(timeSpan);
-    }
-    wrap.appendChild(status);
-
-    // Continuous progress bar
-    if (item.status === 'uploading' || item.status === 'processing') {
-        const prWrap = document.createElement('div');
-        prWrap.className = 'custom-progress';
-        prWrap.style.cssText = 'margin-top: 0.5rem; background: rgba(255,255,255,0.08); height: 6px; border-radius: 3px; overflow: hidden;';
-        
-        const prBar = document.createElement('div');
-        prBar.className = 'custom-progress-bar';
-        prBar.style.cssText = `width: ${info.pct}%; height: 100%; background: var(--accent-primary); border-radius: 3px; transition: width 0.4s ease;`;
-        
-        prWrap.appendChild(prBar);
-        wrap.appendChild(prWrap);
-    }
-
-    if ((item.status === 'error' || item.status === 'auth_required') && item.error) {
+    if (isErr && item.error) {
         const err = document.createElement('div');
         err.className = 'queue-error-msg';
         err.textContent = item.error;
@@ -556,28 +492,21 @@ function renderQueueItem(item) {
     }
 
     // Actions for auth expired or retry
-    const actions = document.createElement('div');
-    actions.className = 'queue-actions';
+    if (item.status === 'auth_required' || item.status === 'error') {
+        const actions = document.createElement('div');
+        actions.className = 'queue-actions';
+        actions.style.cssText = 'margin-top: 0.75rem;';
 
-    if (item.status === 'auth_required') {
-        const loginBtn = document.createElement('button');
-        loginBtn.className = 'small';
-        loginBtn.textContent = 'Войти';
-        loginBtn.addEventListener('click', () => {
-            window.open('/login', '_blank');
-        });
-        actions.appendChild(loginBtn);
+        if (item.status === 'auth_required') {
+            const loginBtn = document.createElement('button');
+            loginBtn.className = 'small';
+            loginBtn.textContent = 'Войти';
+            loginBtn.addEventListener('click', () => {
+                window.open('/login', '_blank');
+            });
+            actions.appendChild(loginBtn);
+        }
 
-        const retryBtn = document.createElement('button');
-        retryBtn.className = 'secondary small';
-        retryBtn.textContent = '↻ Попробовать снова';
-        retryBtn.addEventListener('click', () => {
-            item.status = 'queued';
-            renderQueue();
-            checkQueueScheduler();
-        });
-        actions.appendChild(retryBtn);
-    } else if (item.status === 'error') {
         const retryBtn = document.createElement('button');
         retryBtn.className = 'secondary small';
         retryBtn.textContent = '↻ Попробовать снова';
@@ -590,25 +519,58 @@ function renderQueueItem(item) {
             checkQueueScheduler();
         });
         actions.appendChild(retryBtn);
+        wrap.appendChild(actions);
     }
 
-    if (actions.children.length) wrap.appendChild(actions);
     return wrap;
 }
 
 function updateProcessingItems() {
     for (const item of queue) {
-        if (item.status !== 'processing' && item.status !== 'uploading') continue;
         const wrap = document.querySelector(`.queue-item[data-key="${item.key}"]`);
         if (!wrap) continue;
-        const info = getOverallProgressInfo(item);
-        const stageSpan = wrap.querySelector('.queue-stage-text');
-        const timeSpan = wrap.querySelector('.queue-time-text');
-        const prBar = wrap.querySelector('.custom-progress-bar');
 
-        if (stageSpan) stageSpan.textContent = info.stageText;
-        if (timeSpan) timeSpan.textContent = info.timeText;
-        if (prBar) prBar.style.width = info.pct + '%';
+        // Smooth continuous client-side timer
+        const sw = wrap.querySelector('.stopwatch-badge');
+        if (sw) {
+            if (!item.clientStartTime) {
+                item.clientStartTime = item.created_at ? item.created_at * 1000 : Date.now();
+            }
+            const elapsed = item.finalElapsed != null
+                ? item.finalElapsed
+                : Math.max(0, Math.floor((Date.now() - item.clientStartTime) / 1000));
+
+            if (item.status === 'done') {
+                if (item.finalElapsed == null) item.finalElapsed = elapsed;
+                sw.className = 'stopwatch-badge completed';
+                sw.textContent = `✓ ${formatHMS(item.finalElapsed)}`;
+            } else if (item.status === 'processing' || item.status === 'uploading') {
+                sw.className = 'stopwatch-badge';
+                sw.textContent = formatHMS(elapsed);
+            }
+        }
+
+        if (item.status !== 'processing' && item.status !== 'uploading') continue;
+
+        // Update flat step tracker
+        const stepList = wrap.querySelector('.flat-step-list');
+        if (stepList) {
+            const steps = getJobSteps(item);
+            const rows = stepList.querySelectorAll('.flat-step-row');
+            steps.forEach((step, idx) => {
+                const r = rows[idx];
+                if (!r) return;
+                r.className = `flat-step-row ${step.state}`;
+                const icon = r.querySelector('.flat-step-icon');
+                const text = r.querySelector('.flat-step-text');
+                if (icon) {
+                    icon.textContent = step.state === 'completed' ? '✓' :
+                                       step.state === 'active' ? '●' :
+                                       step.state === 'error' ? '✕' : '○';
+                }
+                if (text) text.textContent = step.title;
+            });
+        }
     }
 }
 
@@ -744,7 +706,7 @@ function notifyJobDone() {
     playCompletionChime();
     const doneCnt = queue.filter((q) => q.status === 'done').length;
     if (document.hidden && doneCnt > 0) {
-        document.title = `🔔 (${doneCnt}) Готово! — ${originalTitle}`;
+        document.title = `(${doneCnt}) Готово — ${originalTitle}`;
     }
 }
 
@@ -777,8 +739,13 @@ async function loadHistoryJobs() {
                     metadata: remote.metadata || {},
                     status: 'processing',
                     phase: remote.phase || 'processing',
+                    phase_detail: remote.phase_detail,
+                    speakers_count: remote.speakers_count,
+                    utterances_count: remote.utterances_count,
+                    total_chunks: remote.total_chunks,
+                    current_chunk: remote.current_chunk,
+                    duration_min: remote.duration_min,
                     created_at: remote.created_at,
-                    progress: 50,
                     pollStart: Date.now()
                 };
                 queue.push(item);
