@@ -1041,10 +1041,12 @@ function checkOrphanedRecording() {
     getReq.onsuccess = () => {
         if (getReq.result && getReq.result.length > 0) {
             console.log('Found orphaned recording chunks, recovering...');
-            const recoveredBlob = new Blob(getReq.result, { type: 'audio/webm' });
-            const recoveredFile = new File([recoveredBlob], `Восстановленная_запись_${new Date().toISOString().slice(0,10)}.webm`, { type: 'audio/webm' });
+            const firstType = getReq.result[0].type || 'audio/webm';
+            const ext = firstType.includes('mp4') ? 'mp4' : 'webm';
+            const recoveredBlob = new Blob(getReq.result, { type: firstType });
+            const recoveredFile = new File([recoveredBlob], `Восстановленная_запись_${new Date().toISOString().slice(0,10)}.${ext}`, { type: firstType });
             addFilesToQueue([recoveredFile]);
-            clearChunksDB();
+            setTimeout(clearChunksDB, 100);
         }
     };
 }
@@ -1087,11 +1089,13 @@ async function startRecording() {
             const timerEl = $('recording-timer');
             if (timerEl) timerEl.textContent = '00:00:00';
 
-            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            const mime = mediaRecorder.mimeType || 'audio/webm';
+            const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+            const audioBlob = new Blob(audioChunks, { type: mime });
             const dateStr = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
-            const file = new File([audioBlob], `Запись_${dateStr}.webm`, { type: 'audio/webm' });
+            const file = new File([audioBlob], `Запись_${dateStr}.${ext}`, { type: mime });
             addFilesToQueue([file]);
-            clearChunksDB();
+            setTimeout(clearChunksDB, 100);
         };
 
         mediaRecorder.start(1000); // chunk every 1 second

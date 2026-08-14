@@ -39,8 +39,22 @@ def verify_user_credentials(username: str, password: str) -> bool:
     return user_store.verify(username, password)
 
 
+_ephemeral_dev_secret: Optional[str] = None
+
+
 def _session_secret() -> str:
-    return SECRET_KEY or WEBHOOK_SECRET or "fallback-dev-secret-do-not-use-in-prod"
+    global _ephemeral_dev_secret
+    if SECRET_KEY:
+        return SECRET_KEY
+    if WEBHOOK_SECRET:
+        return WEBHOOK_SECRET
+    if _ephemeral_dev_secret is None:
+        _ephemeral_dev_secret = secrets.token_hex(32)
+        log.warning(
+            "Neither SECRET_KEY nor WEBHOOK_SECRET is set in environment. "
+            "Generated an ephemeral in-memory session secret for this process."
+        )
+    return _ephemeral_dev_secret
 
 
 def make_session_token(username: str) -> str:
@@ -290,7 +304,7 @@ LOGIN_HTML = """<!DOCTYPE html>
                 </div>
                 <div class="changelog-item">
                     <div class="changelog-date">06 августа 2026</div>
-                    <div class="changelog-desc">Переход на DeepSeek Flash / GPT-4o-mini, ускорение генерации в 2.5 раза и таймер ETA.</div>
+                    <div class="changelog-desc">Переход на GPT-4o-mini / Gemini Flash, ускорение генерации в 2.5 раза и таймер ETA.</div>
                 </div>
                 <div class="changelog-item">
                     <div class="changelog-date">05 августа 2026</div>

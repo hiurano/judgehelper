@@ -18,19 +18,19 @@ def test_job_store_basic_crud(temp_job_store):
     assert "job1" not in store
     assert store.get("job1") is None
 
-    data = {"status": "processing", "user_id": "elena"}
+    data = {"status": "processing", "user_id": "test"}
     store["job1"] = data
 
     assert len(store) == 1
     assert "job1" in store
     retrieved = store["job1"]
     assert retrieved["status"] == "processing"
-    assert retrieved["user_id"] == "elena"
+    assert retrieved["user_id"] == "test"
 
 
 def test_job_store_aai_id_lookup_and_stats(temp_job_store):
     store = temp_job_store
-    store["job-123"] = {"status": "done", "aai_transcript_id": "aai-abc", "duration_min": 10.5, "user_id": "elena"}
+    store["job-123"] = {"status": "done", "aai_transcript_id": "aai-abc", "duration_min": 10.5, "user_id": "test"}
 
     found_id, data = store.get_by_aai_id("aai-abc")
     assert found_id == "job-123"
@@ -40,7 +40,7 @@ def test_job_store_aai_id_lookup_and_stats(temp_job_store):
     assert found_id_direct == "job-123"
     assert data_direct["status"] == "done"
 
-    stats = store.get_user_stats("elena")
+    stats = store.get_user_stats("test")
     assert stats["total_protocols"] == 1
     assert stats["total_duration_min"] == 10.5
 
@@ -70,3 +70,44 @@ def test_job_store_get_pending_jobs(temp_job_store):
     assert len(pending) == 1
     assert pending[0]["id"] == "job-processing"
     assert pending[0]["phase"] == "transcribing"
+
+
+def test_password_hashing_and_legacy_upgrade(tmp_path):
+    import hashlib
+    from backend.db import UserStore, hash_password, verify_password
+
+    # 1. PBKDF2 hash verification
+    pwd = "SecretPassword123!"
+    stored = hash_password(pwd)
+    assert stored.startswith("pbkdf2:600000:")
+    assert verify_password(pwd, stored) is True
+    assert verify_password("WrongPassword", stored) is False
+
+    # 2. Legacy SHA-256 (salt:hash) backward compatibility
+    legacy_salt = "1234567890abcdef"
+    legacy_hash = hashlib.sha256(f"{legacy_salt}:{pwd}".encode()).hexdigest()
+    legacy_stored = f"{legacy_salt}:{legacy_hash}"
+    assert verify_password(pwd, legacy_stored) is True
+    assert verify_password("WrongPassword", legacy_stored) is False
+
+    # 3. UserStore transparent upgrade from legacy hash to PBKDF2 on verify
+    user_db = tmp_path / "test_users.db"
+    store = UserStore(str(user_db))
+
+    # Manually insert user with legacy hash
+    with store._conn() as conn:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
+            ("legacy_user", legacy_stored, "Legacy", int(time.time())),
+        )
+
+    # First verify should succeed and trigger upgrade
+    assert store.verify("legacy_user", pwd) is True
+
+    # Check that the hash was upgraded in SQLite
+    with store._conn() as conn:
+        new_row = conn.execute("SELECT password_hash FROM users WHERE username = 'legacy_user'").fetchone()
+    assert new_row[0].startswith("pbkdf2:600000:")
+    # Subsequent login works with upgraded hash
+    assert store.verify("legacy_user", pwd) is True
+
