@@ -45,35 +45,30 @@ from backend.config import (
     log,
 )
 from backend.db import get_lock, jobs, user_store
-from backend.services.ai_service import (
-    aai_polling_loop,
-    async_retry,
-    close_shared_client,
-    get_shared_client,
-    process_transcript,
-    recover_pending_jobs,
-    submit_to_assemblyai,
-)
 from backend.services.docx_generator import render_docx
+from backend.services.http_client import close_shared_client, get_shared_client
+from backend.services.pipeline import process_transcript, recover_pending_jobs
+from backend.services.transcription import aai_polling_loop, submit_to_assemblyai
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        # Ensure test/admin user exists (create_user is idempotent — skips if exists)
+        # Seed users: from .env if provided, or fallback to admin:admin if user table is empty
         seeded = []
-        if user_store.create_user("test", "Test-2026", "Тест"):
-            seeded.append("test")
+        if user_store.create_user("admin", "admin", "Администратор"):
+            seeded.append("admin")
         if AUTH_USERNAME and AUTH_PASSWORD:
-            if user_store.create_user(AUTH_USERNAME, AUTH_PASSWORD):
+            if user_store.create_user(AUTH_USERNAME, AUTH_PASSWORD, AUTH_USERNAME.capitalize()):
                 seeded.append(AUTH_USERNAME)
+
         if seeded:
             log.info(f"Seeded user accounts: {', '.join(seeded)}")
 
         n = jobs.cleanup_old(JOB_TTL_DAYS)
         if n:
             log.info(f"Startup: pruned {n} job entries older than {JOB_TTL_DAYS} days")
-        
+
         # Start background tasks
         asyncio.create_task(aai_polling_loop())
         await recover_pending_jobs()
@@ -116,8 +111,8 @@ async def login_page(request: Request):
 
 
 @app.post("/login")
-async def login_submit(username: str = Form(...), password: str = Form(...)):
-    return await login_submit_handler(username, password)
+async def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+    return await login_submit_handler(username, password, request=request)
 
 
 @app.get("/logout")

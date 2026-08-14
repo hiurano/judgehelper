@@ -9,11 +9,28 @@ import secrets
 import time
 from typing import Optional
 
-from fastapi import Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+try:
+    from fastapi import Request
+    from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+except ImportError:
+    Request = None
+    class HTMLResponse:
+        def __init__(self, content="", **kwargs):
+            self.content = content
+    class JSONResponse:
+        def __init__(self, content=None, status_code=200, **kwargs):
+            self.content = content
+            self.status_code = status_code
+    class RedirectResponse:
+        def __init__(self, url="", status_code=307, **kwargs):
+            self.url = url
+            self.status_code = status_code
+        def set_cookie(self, *args, **kwargs): pass
+        def delete_cookie(self, *args, **kwargs): pass
 
 from backend.config import (
     SECRET_KEY,
+    STATIC_DIR,
     WEBHOOK_SECRET,
     log,
 )
@@ -103,247 +120,30 @@ async def session_auth_middleware(request: Request, call_next):
     return JSONResponse({"detail": "Не авторизованы"}, status_code=401)
 
 
-LOGIN_HTML = """<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Вход — Помощник секретаря</title>
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <meta name="theme-color" content="#111111">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            margin: 0; min-height: 100vh;
-            display: flex; align-items: center; justify-content: center;
-            padding: 1.5rem;
-            background: #111111;
-            color: #E0E0E0;
-            -webkit-text-size-adjust: 100%;
-        }
-        .login-wrapper {
-            display: flex;
-            align-items: stretch;
-            justify-content: center;
-            gap: 1.75rem;
-            width: 100%;
-            max-width: 820px;
-        }
-        @media (max-width: 768px) {
-            .login-wrapper {
-                flex-direction: column;
-                max-width: 400px;
-            }
-            .changelog-card {
-                display: none;
-            }
-        }
-        .card {
-            background: #191919; border: 1px solid #3C3C3C;
-            border-radius: 14px; padding: 2.25rem 1.75rem;
-            box-shadow: 0 16px 32px rgba(0,0,0,0.4);
-            flex: 1;
-            min-width: 320px;
-        }
-        .logo {
-            width: 64px; height: 64px; margin: 0 auto 1.25rem;
-            background: #AAAAAA; color: #111111;
-            border-radius: 14px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 1.5rem; font-weight: 700;
-            letter-spacing: -0.03em;
-        }
-        h1 {
-            text-align: center; margin: 0 0 0.35rem;
-            font-size: 1.35rem; font-weight: 600;
-            color: #E0E0E0;
-        }
-        .subtitle {
-            text-align: center; color: #828282;
-            margin: 0 0 1.75rem; font-size: 0.9rem;
-        }
-        .error {
-            background: rgba(221, 221, 221, 0.1); border: 1px solid rgba(221, 221, 221, 0.3);
-            color: #DDDDDD;
-            border-radius: 8px; padding: 0.625rem 0.875rem;
-            font-size: 0.85rem; margin-bottom: 1.25rem;
-        }
-        label {
-            display: block; margin-bottom: 1rem;
-            font-size: 0.85rem; color: #828282; font-weight: 500;
-        }
-        input {
-            display: block; width: 100%;
-            margin-top: 0.375rem;
-            padding: 0.75rem 0.875rem;
-            border: 1px solid #3C3C3C; border-radius: 8px;
-            font-size: 0.95rem; font-family: inherit;
-            min-height: 44px;
-            background: #151515; color: #E0E0E0;
-            -webkit-appearance: none;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-        input:focus { outline: none; border-color: #AAAAAA; box-shadow: 0 0 0 2px rgba(170, 170, 170, 0.25); }
-        input:-webkit-autofill,
-        input:-webkit-autofill:hover, 
-        input:-webkit-autofill:focus, 
-        input:-webkit-autofill:active {
-            -webkit-box-shadow: 0 0 0 1000px #151515 inset !important;
-            -webkit-text-fill-color: #E0E0E0 !important;
-            caret-color: #E0E0E0 !important;
-            transition: background-color 50000s ease-in-out 0s;
-        }
-        button {
-            width: 100%; min-height: 46px;
-            background: #AAAAAA; color: #111111; border: none;
-            border-radius: 8px; padding: 0.875rem 1.25rem;
-            font-size: 0.975rem; font-family: inherit; font-weight: 600; cursor: pointer;
-            margin-top: 0.5rem;
-            transition: background-color 0.15s, transform 0.1s;
-        }
-        button:hover { background: #CCCCCC; }
-        button:active { transform: scale(0.98); }
+_login_template_cache: Optional[str] = None
 
-        /* Changelog Side Panel */
-        .changelog-card {
-            background: #191919;
-            border: 1px solid #3C3C3C;
-            border-radius: 14px;
-            padding: 2.25rem 1.75rem;
-            box-shadow: 0 16px 32px rgba(0,0,0,0.4);
-            flex: 1;
-            min-width: 320px;
-            display: flex;
-            flex-direction: column;
-        }
-        .changelog-header {
-            display: flex;
-            align-items: center;
-            gap: 0.6rem;
-            margin-bottom: 1.25rem;
-            padding-bottom: 0.875rem;
-            border-bottom: 1px solid #3C3C3C;
-        }
-        .changelog-icon {
-            font-size: 1.25rem;
-        }
-        .changelog-title {
-            font-size: 1.05rem;
-            font-weight: 600;
-            color: #E0E0E0;
-        }
-        .changelog-list {
-            display: flex;
-            flex-direction: column;
-            gap: 1.15rem;
-            max-height: 360px;
-            overflow-y: auto;
-            padding-right: 6px;
-        }
-        .changelog-list::-webkit-scrollbar {
-            width: 5px;
-        }
-        .changelog-list::-webkit-scrollbar-thumb {
-            background: #3C3C3C;
-            border-radius: 3px;
-        }
-        .changelog-item {
-            border-left: 2px solid #AAAAAA;
-            padding-left: 0.875rem;
-        }
-        .changelog-date {
-            font-size: 0.8rem;
-            font-weight: 600;
-            color: #AAAAAA;
-            margin-bottom: 0.25rem;
-        }
-        .changelog-desc {
-            font-size: 0.85rem;
-            color: #828282;
-            line-height: 1.45;
-        }
-    </style>
-</head>
-<body>
-    <div class="login-wrapper">
-        <form class="card" method="POST" action="/login" autocomplete="on">
-            <div class="logo">ПС</div>
-            <h1>Помощник секретаря</h1>
-            <p class="subtitle">Войдите, чтобы продолжить</p>
-            __ERROR__
-            <label>
-                Имя пользователя
-                <input type="text" name="username" required autocomplete="username" autofocus
-                       autocapitalize="off" autocorrect="off" spellcheck="false">
-            </label>
-            <label>
-                Пароль
-                <input type="password" name="password" required autocomplete="current-password">
-            </label>
-            <button type="submit">Войти</button>
-        </form>
 
-        <div class="changelog-card">
-            <div class="changelog-header">
-                <div class="changelog-title">История обновлений</div>
-            </div>
-
-            <div class="changelog-list">
-                <div class="changelog-item">
-                    <div class="changelog-date">09 августа 2026</div>
-                    <div class="changelog-desc">Архитектурный рефакторинг бэкенда: zero-RAM загрузка, гибридный вебхук/поллинг, турбо-база данных на индексах и динамическая смена промптов.</div>
-                </div>
-                <div class="changelog-item">
-                    <div class="changelog-date">07 августа 2026</div>
-                    <div class="changelog-desc">Умная фоновая очередь файлов, расчёт сэкономленного времени и нативная монохромная тема Noctalia.</div>
-                </div>
-                <div class="changelog-item">
-                    <div class="changelog-date">06 августа 2026</div>
-                    <div class="changelog-desc">Переход на GPT-4o-mini / Gemini Flash, ускорение генерации в 2.5 раза и таймер ETA.</div>
-                </div>
-                <div class="changelog-item">
-                    <div class="changelog-date">05 августа 2026</div>
-                    <div class="changelog-desc">Автоматическое исправление ASR оговорок распознавания редких судебных фамилий.</div>
-                </div>
-                <div class="changelog-item">
-                    <div class="changelog-date">04 августа 2026</div>
-                    <div class="changelog-desc">Анализ 58 эталонных судебных протоколов и нативная вёрстка Word (.docx) по стандартам ГОСТ.</div>
-                </div>
-                <div class="changelog-item">
-                    <div class="changelog-date">03 июля 2026</div>
-                    <div class="changelog-desc">Точный режим дословного протоколирования («Анти-сокращение») и поддержка 16 000 токенов.</div>
-                </div>
-                <div class="changelog-item">
-                    <div class="changelog-date">02 июля 2026</div>
-                    <div class="changelog-desc">Авто-разбор фамилий из названий файлов (`[Фамилия]_[Дата]_протокол.docx`) и пакетный drag-and-drop.</div>
-                </div>
-                <div class="changelog-item">
-                    <div class="changelog-date">01 июля 2026</div>
-                    <div class="changelog-desc">Интеграция AssemblyAI Speech Models с динамическим бустом судебной терминологии.</div>
-                </div>
-                <div class="changelog-item">
-                    <div class="changelog-date">30 июня 2026</div>
-                    <div class="changelog-desc">Унификация интерфейса под строгую монохромную тему и внедрение векторных иконок.</div>
-                </div>
-                <div class="changelog-item">
-                    <div class="changelog-date">29 июня 2026</div>
-                    <div class="changelog-desc">Первый релиз архитектуры Помощника Секретаря на базе FastAPI, SQLite и локальной ИИ-обработки.</div>
-                </div>
-            </div>
-        </div>
-    </div>
-</body>
-</html>"""
+def _get_login_template() -> str:
+    """Load and cache the login page HTML template from static/login.html."""
+    global _login_template_cache
+    if _login_template_cache is None:
+        template_file = STATIC_DIR / "login.html"
+        if template_file.exists():
+            _login_template_cache = template_file.read_text(encoding="utf-8")
+        else:
+            _login_template_cache = (
+                "<!DOCTYPE html><html><head><title>Вход</title></head>"
+                "<body><h1>Вход</h1>__ERROR__"
+                "<form method='POST' action='/login'>"
+                "<input name='username' required/><input type='password' name='password' required/>"
+                "<button type='submit'>Войти</button></form></body></html>"
+            )
+    return _login_template_cache
 
 
 def _login_page(error: str = "") -> HTMLResponse:
     block = f'<div class="error">{error}</div>' if error else ""
-    html = LOGIN_HTML.replace("__ERROR__", block)
+    html = _get_login_template().replace("__ERROR__", block)
     return HTMLResponse(content=html)
 
 
@@ -358,6 +158,7 @@ async def login_page_handler(request: Request):
 async def login_submit_handler(
     username: str,
     password: str,
+    request: Optional[Request] = None,
 ):
     clean_user = (username or "").strip()
     if not verify_user_credentials(clean_user, password):
@@ -366,12 +167,18 @@ async def login_submit_handler(
 
     token = make_session_token(clean_user)
     resp = RedirectResponse(url="/", status_code=303)
+
+    is_https = False
+    if request is not None and hasattr(request, "headers"):
+        proto = request.headers.get("x-forwarded-proto", getattr(request.url, "scheme", "http"))
+        is_https = (proto == "https")
+
     resp.set_cookie(
         SESSION_COOKIE,
         token,
         max_age=SESSION_DURATION,
         httponly=True,
-        secure=True,
+        secure=is_https,
         samesite="lax",
         path="/",
     )

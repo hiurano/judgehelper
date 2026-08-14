@@ -27,7 +27,11 @@
 - `config.py` — загрузка переменных окружения (`.env`), настроек, динамическое перечитывание промпта (hot-reload) и ротация логов (`RotatingFileHandler`).
 - `db.py` — SQLite хранилище для задач (`JobStore`) с индексированными колонками и менеджером блокировок, и хранилище пользователей (`UserStore`).
 - `services/` — специализированные модули:
-  - `ai_service.py` — вызовы ASR (AssemblyAI) и LLM (OpenRouter/OpenAI/Gemini/Claude) с повторами (`async_retry`) и авто-переключением моделей.
+  - `ai_service.py` — фасад обратной совместимости (реэкспорт всех сервисов).
+  - `http_client.py` — управление HTTP-клиентом `httpx.AsyncClient` и механизм повторов (`async_retry`).
+  - `transcription.py` — интеграция с AssemblyAI (стриминг, word boost) и фоновый поллинг (`aai_polling_loop`).
+  - `llm.py` — чанкинг стенограмм с сохранением контекста ролей и каскадный fallback для OpenRouter.
+  - `pipeline.py` — оркестрация обработки (`process_transcript`) и самовосстановление (`recover_pending_jobs`).
   - `docx_generator.py` — сборка документов Word с соблюдением судебных отступов и шрифтов.
   - `text_cleaner.py` — движок Regex-замен судебной терминологии и фамилий.
 - `tests/` — комплексный пакет автоматических интеграционных и модульных тестов (`pytest`).
@@ -35,6 +39,7 @@
 ### 2. `backend/static/` (Фронтенд / "Внешний вид")
 То, что загружается в браузере:
 - `index.html` — разметка интерфейса и диалогов.
+- `login.html` — шаблон страницы входа в теме Noctalia Monochrome.
 - `style.css` — монохромная тема Noctalia.
 - `app.js` — логика интерфейса (Drag-and-Drop, таймер ETA, polling статуса каждые 5 сек).
 

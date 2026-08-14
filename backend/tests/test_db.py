@@ -2,7 +2,13 @@
 Unit tests for SQLite JobStore database module.
 """
 import time
-import pytest
+try:
+    import pytest
+except ImportError:
+    class pytest:
+        @staticmethod
+        def fixture(fn):
+            return fn
 from backend.db import JobStore
 
 
