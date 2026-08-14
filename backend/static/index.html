@@ -17,12 +17,13 @@
     <meta name="apple-mobile-web-app-title" content="Протокол">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 
-    <!-- Fonts -->
+    <!-- Fonts: SF Pro & Apple Native Stack -->
+    <link href="https://fonts.cdnfonts.com/css/sf-pro-display" rel="stylesheet">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="/static/style.css?v=32">
+    <link rel="stylesheet" href="/static/style.css?v=41">
 </head>
 
 <body>
@@ -121,10 +122,10 @@
                 <div class="card" id="queue-card" hidden>
                     <h2 id="queue-title">Обработка</h2>
                     <div id="queue-list"></div>
-                    <div style="margin-top: 1rem;">
-                        <button id="add-more-btn" class="secondary" style="width: 100%;">+ Добавить ещё файл</button>
+                    <div id="queue-toolbar" class="queue-toolbar">
+                        <button id="add-more-btn" class="secondary">+ Добавить файл</button>
+                        <button id="start-staged-btn" class="primary" style="margin-left: auto;">Расшифровать</button>
                     </div>
-                    <div id="staged-bar-container" style="margin-top: 1.25rem;"></div>
                 </div>
             </div>
 
@@ -143,7 +144,7 @@
 
     </div>
 
-    <script src="/static/app.js?v=31"></script>
+    <script src="/static/app.js?v=42"></script>
 </body>
 
 </html>

@@ -91,6 +91,7 @@ async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
         existing.update({
             "status": "processing",
             "phase": "transcribing",
+            "phase_detail": "Распознавание речи и разделение спикеров...",
             "aai_transcript_id": aai_transcript_id,
             "aai_started_at": now,
         })
