@@ -24,11 +24,18 @@ logging.basicConfig(
 )
 log = logging.getLogger("judge-helper")
 
-from dotenv import load_dotenv
-
-# Load .env
-env_file = PROJECT_DIR / ".env"
-load_dotenv(env_file)
+try:
+    from dotenv import load_dotenv
+    env_file = PROJECT_DIR / ".env"
+    load_dotenv(env_file)
+except ImportError:
+    env_file = PROJECT_DIR / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip("'\""))
 
 ASSEMBLYAI_KEY = os.environ.get("ASSEMBLYAI_API_KEY", "")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
@@ -41,7 +48,7 @@ AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
 DB_PATH = os.environ.get("DB_PATH") or str(BACKEND_DIR / "data" / "jobs.db")
 JOB_TTL_DAYS = int(os.environ.get("JOB_TTL_DAYS", "30"))
-DEFAULT_USER = os.environ.get("DEFAULT_USER", "test")
+DEFAULT_USER = os.environ.get("DEFAULT_USER", "admin")
 MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB
 
 # Models tried in order; first success wins.
