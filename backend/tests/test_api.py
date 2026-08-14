@@ -15,9 +15,9 @@ def auth_client(monkeypatch):
     import backend.main as main_mod
     monkeypatch.setattr(main_mod, "ASSEMBLYAI_KEY", "test-aai-key-12345")
     # Ensure test user exists in SQLite
-    user_store.create_user("elena", "protocol2026", "Елена")
+    user_store.create_user("test", "Test-2026", "Тест")
     test_client = TestClient(app)
-    test_client.cookies.set(SESSION_COOKIE, make_session_token("elena"))
+    test_client.cookies.set(SESSION_COOKIE, make_session_token("test"))
     return test_client
 
 
@@ -39,7 +39,7 @@ def test_api_me_endpoint_authorized(auth_client):
     response = auth_client.get("/api/me")
     assert response.status_code == 200
     data = response.json()
-    assert data["username"] == "elena"
+    assert data["username"] == "test"
     assert "display_name" in data
 
 
@@ -76,7 +76,7 @@ def test_status_endpoint_done(auth_client):
     jobs["job-test-done"] = {
         "status": "done",
         "draft": "Протокол готов",
-        "user_id": "elena",
+        "user_id": "test",
         "aai_transcript_id": "aai-test-123"
     }
     # Test lookup by job_id
@@ -113,9 +113,9 @@ def test_session_token_with_custom_secret_key(monkeypatch):
     from backend.auth import make_session_token, verify_session_token
 
     monkeypatch.setattr(config, "SECRET_KEY", "custom-super-secret-key-12345")
-    token = make_session_token("elena")
+    token = make_session_token("test")
     username = verify_session_token(token)
-    assert username == "elena"
+    assert username == "test"
 
 
 def test_log_rotation_handler_configured():
@@ -182,5 +182,47 @@ def test_split_transcript_into_chunks():
     # Check that each chunk is within max_chunk_chars bounds
     for chunk in chunks:
         assert len(chunk) <= 400  # allowing reasonable room for paragraph boundaries
+
+
+def test_webhook_secret_constant_time_validation(monkeypatch):
+    import backend.main as main_mod
+    monkeypatch.setattr(main_mod, "WEBHOOK_SECRET", "super-secret-webhook-key")
+
+    # Invalid secret -> 401
+    resp_invalid = client.post(
+        "/webhook/aai",
+        json={"transcript_id": "test", "status": "completed"},
+        headers={"x-webhook-secret": "wrong-secret"},
+    )
+    assert resp_invalid.status_code == 401
+
+    # Valid secret -> 200 (even if job not found)
+    resp_valid = client.post(
+        "/webhook/aai",
+        json={"transcript_id": "nonexistent-transcript-123", "status": "completed"},
+        headers={"x-webhook-secret": "super-secret-webhook-key"},
+    )
+    assert resp_valid.status_code == 200
+    assert resp_valid.json()["ok"] is False  # job not found, but authorized
+
+
+def test_ephemeral_dev_session_secret(monkeypatch):
+    import backend.auth as auth_mod
+    monkeypatch.setattr(auth_mod, "SECRET_KEY", "")
+    monkeypatch.setattr(auth_mod, "WEBHOOK_SECRET", "")
+    monkeypatch.setattr(auth_mod, "_ephemeral_dev_secret", None)
+
+    secret1 = auth_mod._session_secret()
+    assert len(secret1) == 64  # 32 bytes hex
+    secret2 = auth_mod._session_secret()
+    assert secret1 == secret2  # Consistent for process lifetime
+
+
+def test_allowed_origins_whitespace_stripping():
+    import os
+    raw_origins = " https://app.example.com , http://localhost:3000 , "
+    cleaned = [o.strip() for o in raw_origins.split(",") if o.strip()]
+    assert cleaned == ["https://app.example.com", "http://localhost:3000"]
+
 
 

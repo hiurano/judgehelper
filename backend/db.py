@@ -16,23 +16,33 @@ from typing import Optional
 from backend.config import DB_PATH, DEFAULT_USER, log
 
 
-# --- Password hashing utilities -------------------------------------------
+PBKDF2_ITERATIONS = 600_000
+
 
 def hash_password(password: str) -> str:
-    """Create a salted SHA-256 hash for storage."""
-    salt = secrets.token_hex(16)
-    h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
-    return f"{salt}:{h}"
+    """Create a salted PBKDF2-HMAC-SHA256 hash for storage."""
+    salt = secrets.token_bytes(16)
+    kdf = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
+    return f"pbkdf2:{PBKDF2_ITERATIONS}:{salt.hex()}:{kdf.hex()}"
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    """Verify a password against a stored salted hash."""
-    try:
-        salt, expected = stored_hash.split(":", 1)
-    except ValueError:
+    """Verify a password against stored hash (supports PBKDF2 and legacy SHA-256)."""
+    if not stored_hash:
         return False
-    h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
-    return secrets.compare_digest(h, expected)
+    try:
+        if stored_hash.startswith("pbkdf2:"):
+            _, iters_str, salt_hex, expected_hex = stored_hash.split(":", 3)
+            salt = bytes.fromhex(salt_hex)
+            kdf = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, int(iters_str))
+            return secrets.compare_digest(kdf.hex(), expected_hex)
+        else:
+            # Legacy single-iteration SHA-256 fallback (salt:hash)
+            salt, expected = stored_hash.split(":", 1)
+            h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+            return secrets.compare_digest(h, expected)
+    except Exception:
+        return False
 
 
 class JobStore:
@@ -56,13 +66,13 @@ class JobStore:
                     id TEXT PRIMARY KEY,
                     data TEXT NOT NULL,
                     updated_at INTEGER NOT NULL,
-                    user_id TEXT DEFAULT 'elena'
+                    user_id TEXT DEFAULT 'test'
                 )"""
             )
             cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
             if "user_id" not in cols:
-                conn.execute("ALTER TABLE jobs ADD COLUMN user_id TEXT DEFAULT 'elena'")
-                conn.execute("UPDATE jobs SET user_id = 'elena' WHERE user_id IS NULL")
+                conn.execute("ALTER TABLE jobs ADD COLUMN user_id TEXT DEFAULT 'test'")
+                conn.execute("UPDATE jobs SET user_id = 'test' WHERE user_id IS NULL")
             if "status" not in cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN status TEXT")
             if "aai_transcript_id" not in cols:
@@ -281,14 +291,31 @@ class UserStore:
             return False
 
     def verify(self, username: str, password: str) -> bool:
-        """Verify login credentials against stored hash."""
+        """Verify login credentials against stored hash, upgrading legacy hashes on success."""
         with self._lock, self._conn() as conn:
             row = conn.execute(
                 "SELECT password_hash FROM users WHERE username = ?", (username,)
             ).fetchone()
         if not row:
             return False
-        return verify_password(password, row[0])
+        stored_hash = row[0]
+        if not verify_password(password, stored_hash):
+            return False
+
+        # If stored hash is legacy SHA-256 format, silently upgrade to PBKDF2
+        if not stored_hash.startswith("pbkdf2:"):
+            new_hash = hash_password(password)
+            try:
+                with self._lock, self._conn() as conn:
+                    conn.execute(
+                        "UPDATE users SET password_hash = ? WHERE username = ?",
+                        (new_hash, username),
+                    )
+                log.info(f"Upgraded password hash to PBKDF2 for user {username!r}")
+            except Exception as e:
+                log.warning(f"Failed to upgrade password hash for {username!r}: {e}")
+
+        return True
 
     def exists(self, username: str) -> bool:
         """Check if a user account exists."""

@@ -8,6 +8,7 @@ transcription (AssemblyAI), LLM drafting (OpenRouter), and DOCX generation.
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+import secrets
 import time
 import urllib.parse
 import uuid
@@ -59,10 +60,8 @@ from backend.services.docx_generator import render_docx
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        # Ensure default users exist (create_user is idempotent — skips if exists)
+        # Ensure test/admin user exists (create_user is idempotent — skips if exists)
         seeded = []
-        if user_store.create_user("elena", "protocol2026", "Елена"):
-            seeded.append("elena")
         if user_store.create_user("test", "Test-2026", "Тест"):
             seeded.append("test")
         if AUTH_USERNAME and AUTH_PASSWORD:
@@ -205,23 +204,24 @@ async def upload(
 
     # Stream the uploaded file directly to disk to avoid RAM OOM
     size_bytes = 0
-    with open(file_path, "wb") as f:
-        while chunk := await file.read(1024 * 1024):  # 1 MB chunks
-            f.write(chunk)
-            size_bytes += len(chunk)
-            if size_bytes > MAX_UPLOAD_BYTES:
-                file_path.unlink()
-                raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
+    try:
+        with open(file_path, "wb") as f:
+            while chunk := await file.read(1024 * 1024):  # 1 MB chunks
+                await asyncio.to_thread(f.write, chunk)
+                size_bytes += len(chunk)
+                if size_bytes > MAX_UPLOAD_BYTES:
+                    raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
 
-    if size_bytes == 0:
-        file_path.unlink()
-        raise HTTPException(400, "Загруженный файл пуст")
+        if size_bytes == 0:
+            raise HTTPException(400, "Загруженный файл пуст")
+
+        if not ASSEMBLYAI_KEY:
+            raise HTTPException(500, "AssemblyAI key not configured on server")
+    except Exception:
+        file_path.unlink(missing_ok=True)
+        raise
 
     size_mb = size_bytes / 1024 / 1024
-
-    if not ASSEMBLYAI_KEY:
-        file_path.unlink()
-        raise HTTPException(500, "AssemblyAI key not configured on server")
         
     metadata = {
         "defendant": defendant.strip(),
@@ -244,7 +244,7 @@ async def upload(
 
 @app.post("/webhook/aai")
 async def aai_webhook(payload: dict, x_webhook_secret: Optional[str] = Header(None)):
-    if WEBHOOK_SECRET and x_webhook_secret != WEBHOOK_SECRET:
+    if WEBHOOK_SECRET and not secrets.compare_digest(x_webhook_secret or "", WEBHOOK_SECRET):
         log.warning("Webhook called with bad/missing secret")
         raise HTTPException(401, "bad secret")
 

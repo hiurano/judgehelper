@@ -34,14 +34,14 @@ ASSEMBLYAI_KEY = os.environ.get("ASSEMBLYAI_API_KEY", "")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BASE_URL = os.environ.get("BASE_URL", "").rstrip("/")
-ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 MODEL = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
 DB_PATH = os.environ.get("DB_PATH") or str(BACKEND_DIR / "data" / "jobs.db")
 JOB_TTL_DAYS = int(os.environ.get("JOB_TTL_DAYS", "30"))
-DEFAULT_USER = os.environ.get("DEFAULT_USER", "elena")
+DEFAULT_USER = os.environ.get("DEFAULT_USER", "test")
 MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB
 
 # Models tried in order; first success wins.
