@@ -15,7 +15,8 @@
 - Резервные копии: `/var/backups/judge-helper`
 - Системный пользователь приложения: `judge-helper` без shell/login
 - GitHub: `https://github.com/hiurano/judge-helper`, ветка `main`
-- Текущий проверенный commit: `253dfb1`
+- Production следует за `origin/main`; точный commit проверяется командой
+  `git -C /srv/judge-helper rev-parse HEAD`.
 - Production backend и Caddy запущены; `/health` и `/ready` возвращают HTTP 200.
 - TLS-сертификат для production URL валиден.
 - В базе на момент обновления сохранены две существующие задачи.
@@ -60,6 +61,8 @@
 - Добавлены `scripts/preflight.py`, `scripts/backup_db.py`, `scripts/deploy.sh`.
 - `deploy.sh` работает и на NixOS без глобального Python через одноразовый Python-контейнер.
 - Перед deployment создаётся согласованная SQLite-копия.
+- Ежедневные SQLite backup выполняются hardened systemd timer от пользователя
+  `judge-helper`, хранятся в `/var/backups/judge-helper` и ротируются через 30 дней.
 - Preflight проверяет секреты, домен, права `.env`, UID/GID каталогов и runtime-файлов.
 - Добавлены Dependabot и dependency audit в CI.
 - Удалён устаревший workflow, пинговавший старый Render deployment.
