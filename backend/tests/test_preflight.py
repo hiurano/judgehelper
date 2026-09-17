@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.backup_db import create_backup
+from scripts.backup_db import create_backup, prune_backups
 from scripts.preflight import load_env
 
 
@@ -37,3 +37,23 @@ def test_create_backup_copies_consistent_sqlite_database(tmp_path):
 
     with sqlite3.connect(destination) as connection:
         assert connection.execute("SELECT name FROM jobs").fetchall() == [("hearing",)]
+
+
+def test_prune_backups_only_removes_expired_managed_files(tmp_path):
+    old_backup = tmp_path / "jobs-old.db"
+    recent_backup = tmp_path / "jobs-recent.db"
+    unrelated = tmp_path / "predeploy-keep.db"
+    for path in (old_backup, recent_backup, unrelated):
+        path.write_bytes(b"sqlite")
+    old_backup.touch()
+    recent_backup.touch()
+    unrelated.touch()
+    import os
+    os.utime(old_backup, (100, 100))
+
+    removed = prune_backups(tmp_path, 1, now=100 + 2 * 86400)
+
+    assert removed == 1
+    assert not old_backup.exists()
+    assert recent_backup.exists()
+    assert unrelated.exists()
