@@ -4,8 +4,6 @@ Transcription service for AssemblyAI speech-to-text integration and background p
 import asyncio
 from pathlib import Path
 import time
-from typing import TYPE_CHECKING
-
 from backend.config import (
     ASSEMBLYAI_KEY,
     BASE_URL,
@@ -15,6 +13,7 @@ from backend.config import (
 )
 from backend.db import get_lock, jobs
 from backend.services.http_client import async_retry, get_shared_client
+from backend.services.task_manager import spawn
 
 
 async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
@@ -38,10 +37,7 @@ async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
                 headers={"authorization": ASSEMBLYAI_KEY},
                 content=file_streamer(),
             )
-            if up_resp.status_code != 200:
-                raise RuntimeError(
-                    f"AssemblyAI upload {up_resp.status_code}: {up_resp.text[:300]}"
-                )
+            up_resp.raise_for_status()
             return up_resp.json()["upload_url"]
 
         audio_url = await async_retry(_do_upload, retries=3, delay=1.0)
@@ -78,10 +74,7 @@ async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
                 },
                 json=body,
             )
-            if submit_resp.status_code != 200:
-                raise RuntimeError(
-                    f"AssemblyAI submit {submit_resp.status_code}: {submit_resp.text[:300]}"
-                )
+            submit_resp.raise_for_status()
             return submit_resp.json()["id"]
 
         aai_transcript_id = await async_retry(_do_submit, retries=3, delay=1.0)
@@ -102,7 +95,8 @@ async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
         existing = jobs.get(job_id, {})
         existing.update({
             "status": "error",
-            "error": f"Не удалось отправить файл на расшифровку: {e}",
+            "error": "Не удалось отправить файл на расшифровку. Повторите попытку позже.",
+            "phase": "error",
         })
         jobs[job_id] = existing
     finally:
@@ -128,40 +122,46 @@ async def aai_polling_loop():
                 continue
 
             client = get_shared_client()
-            for p_job in pending:
+            semaphore = asyncio.Semaphore(10)
+
+            async def poll_one(p_job):
                 job_id = p_job.get("id")
                 aai_id = p_job.get("aai_transcript_id")
-                
                 if not aai_id or p_job.get("phase") != "transcribing":
-                    continue
-                
+                    return
+
                 # If someone is already processing this job (e.g. webhook just fired), skip
                 lock = get_lock(job_id)
                 if lock.locked():
-                    continue
+                    return
 
                 try:
-                    tx_resp = await client.get(
-                        f"https://api.assemblyai.com/v2/transcript/{aai_id}",
-                        headers={"authorization": ASSEMBLYAI_KEY},
-                    )
+                    async with semaphore:
+                        tx_resp = await client.get(
+                            f"https://api.assemblyai.com/v2/transcript/{aai_id}",
+                            headers={"authorization": ASSEMBLYAI_KEY},
+                        )
                     if tx_resp.status_code == 404:
-                        continue
+                        return
                     tx_resp.raise_for_status()
                     aai_body = tx_resp.json()
-                    
+
                     aai_status = aai_body.get("status")
                     aai_audio_duration = aai_body.get("audio_duration")
-                    
+
                     cached = jobs.get(job_id, {})
                     if not cached or cached.get("status") in ("done", "error"):
-                        continue
-                        
+                        return
+
                     if aai_audio_duration and not cached.get("audio_duration_sec"):
                         cached["audio_duration_sec"] = aai_audio_duration
 
                     if aai_status == "error":
-                        cached.update({"status": "error", "error": aai_body.get("error", "AssemblyAI error")})
+                        cached.update({
+                            "status": "error",
+                            "phase": "error",
+                            "error": "Сервис распознавания не смог обработать запись.",
+                        })
                         jobs[job_id] = cached
                     elif aai_status == "completed":
                         cached.update({
@@ -171,14 +171,16 @@ async def aai_polling_loop():
                         })
                         jobs[job_id] = cached
                         if not lock.locked():
-                            asyncio.create_task(process_transcript(job_id))
+                            spawn(process_transcript(job_id), name=f"process:{job_id}")
                     else:
                         cached.update({"aai_status": aai_status})
                         jobs[job_id] = cached
 
                 except Exception as inner_e:
                     log.error(f"[{job_id}] Polling error: {inner_e}")
-                    
+
+            await asyncio.gather(*(poll_one(p_job) for p_job in pending))
+
         except asyncio.CancelledError:
             break
         except Exception as e:

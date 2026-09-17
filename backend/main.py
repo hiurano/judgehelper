@@ -14,10 +14,8 @@ import urllib.parse
 import uuid
 from typing import Optional
 
-import httpx
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -25,7 +23,7 @@ from backend.auth import (
     login_page_handler,
     login_submit_handler,
     logout_handler,
-    session_auth_middleware,
+    SessionAuthMiddleware,
 )
 from backend.config import (
     ALLOWED_ORIGINS,
@@ -36,9 +34,11 @@ from backend.config import (
     BASE_URL,
     DEFAULT_USER,
     JOB_TTL_DAYS,
+    MAX_ACTIVE_JOBS_PER_USER,
+    MAX_RENDER_TEXT_CHARS,
     MAX_UPLOAD_BYTES,
-    MODEL,
     OPENROUTER_KEY,
+    SECRET_KEY,
     STATIC_DIR,
     WEBHOOK_SECRET,
     get_system_prompt,
@@ -46,35 +46,77 @@ from backend.config import (
 )
 from backend.db import get_lock, jobs, user_store
 from backend.services.docx_generator import render_docx
-from backend.services.http_client import close_shared_client, get_shared_client
+from backend.services.http_client import close_shared_client
 from backend.services.pipeline import process_transcript, recover_pending_jobs
 from backend.services.transcription import aai_polling_loop, submit_to_assemblyai
+from backend.services.task_manager import cancel_all, spawn
+
+
+def _looks_like_supported_media(header: bytes) -> bool:
+    """Conservative signature check for the media containers accepted by the UI."""
+    return any((
+        header.startswith(b"ID3"),                         # MP3 with ID3
+        len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0,
+        header.startswith(b"RIFF"),                        # WAV
+        header.startswith(b"fLaC"),                        # FLAC
+        header.startswith(b"OggS"),                        # OGG/Opus
+        header.startswith(bytes.fromhex("1a45dfa3")),       # WebM/Matroska
+        header.startswith(bytes.fromhex("3026b2758e66cf11")),  # WMA/ASF
+        len(header) >= 8 and header[4:8] == b"ftyp",       # M4A/MP4
+    ))
+
+
+async def _maintenance_loop():
+    """Periodically enforce retention even when the service is never restarted."""
+    while True:
+        await asyncio.sleep(24 * 60 * 60)
+        deleted = await asyncio.to_thread(jobs.cleanup_old, JOB_TTL_DAYS)
+        if deleted:
+            log.info("Maintenance: pruned %s expired job entries", deleted)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Account setup is security-critical: configuration errors must abort startup.
+    if len(SECRET_KEY) < 32:
+        raise RuntimeError("SECRET_KEY must contain at least 32 characters")
+    if AUTH_PASSWORD and (len(AUTH_PASSWORD) < 12 or AUTH_PASSWORD == AUTH_USERNAME):
+        raise RuntimeError("AUTH_PASSWORD must be at least 12 characters and differ from AUTH_USERNAME")
+
+    seeded = []
+    if AUTH_USERNAME and AUTH_PASSWORD:
+        if user_store.create_user(AUTH_USERNAME, AUTH_PASSWORD, AUTH_USERNAME.capitalize()):
+            seeded.append(AUTH_USERNAME)
+    if seeded:
+        log.info(f"Seeded user accounts: {', '.join(seeded)}")
+    if user_store.exists("admin") and user_store.verify("admin", "admin"):
+        if AUTH_USERNAME == "admin" and AUTH_PASSWORD and AUTH_PASSWORD != "admin":
+            user_store.change_password("admin", AUTH_PASSWORD)
+            log.warning("Replaced legacy admin/admin credentials with AUTH_PASSWORD")
+        else:
+            raise RuntimeError(
+                "Insecure legacy admin/admin account detected. Set AUTH_USERNAME=admin "
+                "and a strong AUTH_PASSWORD before starting."
+            )
+    if user_store.is_empty():
+        raise RuntimeError(
+            "No user accounts exist. Set AUTH_USERNAME and AUTH_PASSWORD "
+            "or create an account with backend.cli before starting the service."
+        )
+
     try:
-        # Seed users: from .env if provided, or fallback to admin:admin if user table is empty
-        seeded = []
-        if user_store.create_user("admin", "admin", "Администратор"):
-            seeded.append("admin")
-        if AUTH_USERNAME and AUTH_PASSWORD:
-            if user_store.create_user(AUTH_USERNAME, AUTH_PASSWORD, AUTH_USERNAME.capitalize()):
-                seeded.append(AUTH_USERNAME)
-
-        if seeded:
-            log.info(f"Seeded user accounts: {', '.join(seeded)}")
-
         n = jobs.cleanup_old(JOB_TTL_DAYS)
         if n:
             log.info(f"Startup: pruned {n} job entries older than {JOB_TTL_DAYS} days")
 
         # Start background tasks
-        asyncio.create_task(aai_polling_loop())
+        spawn(aai_polling_loop(), name="aai-polling-loop")
+        spawn(_maintenance_loop(), name="maintenance-loop")
         await recover_pending_jobs()
     except Exception:
         log.exception("Startup cleanup/recovery failed (non-fatal)")
     yield
+    await cancel_all()
     await close_shared_client()
 
 
@@ -82,19 +124,32 @@ app = FastAPI(title="Judge Helper", docs_url="/api/docs", lifespan=lifespan)
 
 
 # --- Middleware ---------------------------------------------------------
-@app.middleware("http")
-async def add_no_cache_headers(request: Request, call_next):
-    response = await call_next(request)
-    if request.url.path.startswith("/static/") or request.url.path == "/":
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-    return response
+class NoCacheMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        no_cache = scope["type"] == "http" and (
+            scope.get("path", "").startswith("/static/") or scope.get("path") == "/"
+        )
+
+        async def send_with_headers(message):
+            if no_cache and message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.extend([
+                    (b"cache-control", b"no-cache, no-store, must-revalidate"),
+                    (b"pragma", b"no-cache"),
+                    (b"expires", b"0"),
+                ])
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
-app.middleware("http")(session_auth_middleware)
+app.add_middleware(NoCacheMiddleware)
+app.add_middleware(SessionAuthMiddleware)
 
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -115,7 +170,6 @@ async def login_submit(request: Request, username: str = Form(...), password: st
     return await login_submit_handler(username, password, request=request)
 
 
-@app.get("/logout")
 @app.post("/logout")
 async def logout():
     return await logout_handler()
@@ -156,16 +210,19 @@ async def favicon():
 
 @app.get("/health")
 async def health():
-    return {
-        "ok": True,
-        "model": MODEL,
-        "has_assemblyai_key": bool(ASSEMBLYAI_KEY),
-        "has_openrouter_key": bool(OPENROUTER_KEY),
-        "webhook_configured": bool(BASE_URL and WEBHOOK_SECRET),
-        "system_prompt_loaded": bool(get_system_prompt()),
-        "auth_enabled": bool(AUTH_USERNAME and AUTH_PASSWORD),
-        "active_jobs": len(jobs),
-    }
+    return {"ok": True}
+
+
+@app.get("/ready")
+async def ready():
+    ready_now = bool(
+        ASSEMBLYAI_KEY
+        and OPENROUTER_KEY
+        and SECRET_KEY
+        and get_system_prompt()
+        and not user_store.is_empty()
+    )
+    return JSONResponse({"ready": ready_now}, status_code=200 if ready_now else 503)
 
 
 # --- API Endpoints ------------------------------------------------------
@@ -177,6 +234,10 @@ async def upload(
 ):
     allowed_exts = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma", ".webm", ".opus", ".mp4"}
     filename = file.filename or ""
+    if len(filename) > 255:
+        raise HTTPException(400, "Имя файла слишком длинное")
+    if len(defendant) > 300:
+        raise HTTPException(400, "Поле с данными подсудимого слишком длинное")
     ext = Path(filename).suffix.lower()
     if not ext or ext not in allowed_exts:
         raise HTTPException(
@@ -187,21 +248,44 @@ async def upload(
 
     # Pre-check Content-Length to reject oversized uploads before reading
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > MAX_UPLOAD_BYTES:
-        raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
+    if content_length:
+        try:
+            if int(content_length) > MAX_UPLOAD_BYTES + 1024 * 1024:
+                raise HTTPException(413, "Файл слишком большой")
+        except ValueError:
+            raise HTTPException(400, "Некорректный Content-Length")
 
     user_id = getattr(request.state, "user", DEFAULT_USER)
-    
     job_id = "job-" + uuid.uuid4().hex[:24]
+    metadata = {"defendant": defendant.strip()}
+    initial_job = {
+        "status": "processing",
+        "phase": "receiving_upload",
+        "metadata": metadata,
+        "filename": filename,
+        "created_at": int(time.time()),
+        "user_id": user_id,
+    }
+    if not jobs.create_if_under_active_limit(
+        job_id, initial_job, MAX_ACTIVE_JOBS_PER_USER
+    ):
+        raise HTTPException(
+            429,
+            f"Достигнут лимит активных задач ({MAX_ACTIVE_JOBS_PER_USER}). Дождитесь завершения обработки.",
+        )
+
     upload_dir = BACKEND_DIR / "data" / "uploads"
-    upload_dir.mkdir(parents=True, exist_ok=True)
     file_path = upload_dir / f"{job_id}{ext}"
 
     # Stream the uploaded file directly to disk to avoid RAM OOM
     size_bytes = 0
+    header = b""
     try:
+        upload_dir.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
             while chunk := await file.read(1024 * 1024):  # 1 MB chunks
+                if not header:
+                    header = chunk[:16]
                 await asyncio.to_thread(f.write, chunk)
                 size_bytes += len(chunk)
                 if size_bytes > MAX_UPLOAD_BYTES:
@@ -209,37 +293,38 @@ async def upload(
 
         if size_bytes == 0:
             raise HTTPException(400, "Загруженный файл пуст")
+        if not _looks_like_supported_media(header):
+            raise HTTPException(400, "Содержимое файла не соответствует поддерживаемому аудио/видео формату")
 
         if not ASSEMBLYAI_KEY:
             raise HTTPException(500, "AssemblyAI key not configured on server")
-    except Exception:
+    except BaseException:
         file_path.unlink(missing_ok=True)
+        jobs.delete(job_id)
         raise
 
     size_mb = size_bytes / 1024 / 1024
         
-    metadata = {
-        "defendant": defendant.strip(),
-    }
-    log.info(f"Received {filename} ({size_mb:.1f} MB) for user {user_id}; defendant: {defendant}")
+    log.info("Received media file (%s MB) for user %s", f"{size_mb:.1f}", user_id)
 
-    jobs[job_id] = {
-        "status": "processing",
+    initial_job.update({
         "phase": "uploading_to_aai",
-        "metadata": metadata,
         "size_mb": round(size_mb, 1),
-        "filename": filename,
-        "created_at": int(time.time()),
-        "user_id": user_id,
-    }
+    })
+    jobs[job_id] = initial_job
 
-    asyncio.create_task(submit_to_assemblyai(job_id, file_path, filename or "audio"))
+    spawn(
+        submit_to_assemblyai(job_id, file_path, filename or "audio"),
+        name=f"aai-submit:{job_id}",
+    )
     return {"job_id": job_id}
 
 
 @app.post("/webhook/aai")
 async def aai_webhook(payload: dict, x_webhook_secret: Optional[str] = Header(None)):
-    if WEBHOOK_SECRET and not secrets.compare_digest(x_webhook_secret or "", WEBHOOK_SECRET):
+    if not WEBHOOK_SECRET:
+        raise HTTPException(503, "webhook is not configured")
+    if not secrets.compare_digest(x_webhook_secret or "", WEBHOOK_SECRET):
         log.warning("Webhook called with bad/missing secret")
         raise HTTPException(401, "bad secret")
 
@@ -263,12 +348,12 @@ async def aai_webhook(payload: dict, x_webhook_secret: Optional[str] = Header(No
     if status_val != "completed":
         return {"ok": True}
 
-    asyncio.create_task(process_transcript(job_id))
+    spawn(process_transcript(job_id), name=f"process:{job_id}")
     return {"ok": True}
 
 
 @app.get("/status/{job_id}")
-async def status(job_id: str):
+async def status(job_id: str, request: Request):
     found_id, cached = jobs.get_by_aai_id(job_id)
     if found_id:
         job_id = found_id
@@ -276,7 +361,15 @@ async def status(job_id: str):
     if not cached:
         raise HTTPException(404, "Job not found")
 
-    return cached
+    user_id = getattr(request.state, "user", DEFAULT_USER)
+    if cached.get("user_id") != user_id:
+        # Do not disclose whether another user's job exists.
+        raise HTTPException(404, "Job not found")
+
+    response_data = dict(cached)
+    # Legacy rows may still contain raw transcripts; they are never returned.
+    response_data.pop("transcript", None)
+    return response_data
 
 
 @app.get("/jobs")
@@ -314,10 +407,8 @@ async def delete_job(job_id: str, request: Request):
     job_data = jobs.get(job_id)
     if not job_data:
         raise HTTPException(status_code=404, detail="Job not found")
-    # Verify owner if user is not None
-    job_owner = job_data.get("user_id")
-    if job_owner and user_id and job_owner != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this protocol")
+    if job_data.get("user_id") != user_id:
+        raise HTTPException(status_code=404, detail="Job not found")
         
     success = jobs.delete(job_id)
     if not success:
@@ -329,7 +420,7 @@ async def delete_job(job_id: str, request: Request):
 async def get_me(request: Request):
     user_id = getattr(request.state, "user", DEFAULT_USER)
     stats = jobs.get_user_stats(user_id)
-    display_name = user_id.capitalize()
+    display_name = user_store.get_display_name(user_id) or user_id.capitalize()
     return {
         "username": user_id,
         "display_name": display_name,
@@ -344,6 +435,8 @@ async def render_docx_endpoint(payload: dict):
     text = payload.get("text", "")
     if not isinstance(text, str) or not text.strip():
         raise HTTPException(400, "text field is required and must be non-empty")
+    if len(text) > MAX_RENDER_TEXT_CHARS:
+        raise HTTPException(413, "text field is too large")
     docx_bytes = await asyncio.to_thread(render_docx, text)
     filename = payload.get("filename") or "protokol.docx"
     if not filename.endswith(".docx"):

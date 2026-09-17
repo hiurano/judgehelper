@@ -25,6 +25,17 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
+      - name: Validate installed dependencies
+        run: python -m pip check
+
+      - name: Audit dependencies
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
+
+      - name: Compile Python sources
+        run: python -m compileall -q backend
+
       - name: Run Pytest suite
         run: |
           pytest -v

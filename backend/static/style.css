@@ -237,6 +237,15 @@ button.avatar-circle-btn:hover {
     padding: 0.45rem 0.6rem;
     border-radius: var(--radius-control);
     transition: all 0.15s ease;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+}
+
+.profile-dropdown form {
+    margin: 0;
 }
 
 .dropdown-logout-btn:hover {

@@ -18,6 +18,7 @@ except ImportError:
 from backend.config import log
 
 _shared_client = None
+TRANSIENT_HTTP_STATUSES = {408, 409, 425, 429}
 
 
 async def async_retry(coro_fn, retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
@@ -29,6 +30,19 @@ async def async_retry(coro_fn, retries: int = 3, delay: float = 1.0, backoff: fl
             return await coro_fn()
         except HTTPException:
             raise
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status not in TRANSIENT_HTTP_STATUSES and status < 500:
+                raise
+            last_exc = exc
+            if attempt == retries:
+                break
+            log.warning(
+                "Transient HTTP %s (attempt %s/%s). Retrying in %.1fs...",
+                status, attempt, retries, curr_delay,
+            )
+            await asyncio.sleep(curr_delay)
+            curr_delay *= backoff
         except Exception as exc:
             last_exc = exc
             if attempt == retries:
@@ -46,7 +60,7 @@ def get_shared_client():
         raise RuntimeError("httpx is required to use get_shared_client")
     if _shared_client is None or _shared_client.is_closed:
         _shared_client = httpx.AsyncClient(
-            timeout=600.0,
+            timeout=httpx.Timeout(connect=15.0, read=600.0, write=600.0, pool=15.0),
             limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
         )
     return _shared_client

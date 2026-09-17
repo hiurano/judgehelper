@@ -17,14 +17,14 @@
 - **Юридическая обработка речи:** Преобразование устной речи в официальный процессуальный стиль на основе настраиваемого системного промпта (`prompts/system-protocol.md`), который **перечитывается на лету (hot-reload)** без перезагрузок сервера.
 - **Сетевая устойчивость (Async Retry):** Повторные попытки с экспоненциальной задержкой (Exponential Backoff) для устранения кратковременных сбоев внешних API.
 - **Очередь и пакетная загрузка:** Поддержка последовательной обработки нескольких файлов с визуальным отслеживанием прогресса и расчётом оставшегося времени (ETA).
-- **Zero-RAM архитектура:** Файлы любого размера стримятся на диск и в API без загрузки в оперативную память, полностью устраняя риски OOM (Out Of Memory).
-- **Отказоустойчивость LLM:** Каскадная цепочка резервных моделей (OpenAI / Gemini / Claude) с автоматическим переключением при сбоях основной модели. Использование "окна памяти" для удержания ролей спикеров в длинных многочасовых аудио.
+- **Потоковая обработка файлов:** Файлы до настраиваемого лимита `MAX_UPLOAD_BYTES` стримятся на диск и во внешний API без полной загрузки в оперативную память.
+- **Отказоустойчивость LLM:** Явно настраиваемая цепочка резервных моделей (`LLM_FALLBACK_MODELS`). Другой AI-провайдер используется только после разрешения оператора. Используется «окно памяти» для удержания ролей спикеров в длинных записях.
 - **Самовосстановление (Self-Healing):** Автоматическое восстановление незавершённых фоновых задач при перезапуске сервера через гибридный механизм пуш-вебхуков и резервного фонового поллинга.
 - **Форматирование по судебному стандарту:** Динамическая генерация документов Word (Times New Roman 12pt, красные строки 1.25 см, поля, табуляция подписей и дат по правому краю 16.5 см).
-- **Авторизация и безопасность:** Встроенная cookie-авторизация на базе HMAC-токенов (`SECRET_KEY`) и локальная база аккаунтов (SQLite) с CLI-утилитой для управления.
+- **Авторизация и безопасность:** Cookie-авторизация на базе HMAC-токенов (`SECRET_KEY`), отзыв сессий при смене пароля, ограничение попыток входа и изоляция задач по владельцам.
 - **Надёжное хранение и память:** Хранение задач в SQLite (WAL) с индексированными колонками для турбо-поиска, автоматическая очистка устаревших записей (`JOB_TTL_DAYS`) и освобождение сокетов/блокировок.
 - **Ротация логов:** Автоматическая ротация лог-файлов (`RotatingFileHandler`, до 5 архивов по 10 МБ).
-- **Высокая производительность:** HTTP Connection Pooling (Keep-Alive), сетевое GZip-сжатие ответов и целевое DOM-обновление таймеров на фронтенде.
+- **Высокая производительность:** HTTP Connection Pooling (Keep-Alive), потоковая работа с файлами и целевое DOM-обновление таймеров на фронтенде.
 
 ---
 
@@ -48,14 +48,15 @@ OPENROUTER_API_KEY=your_openrouter_key
 
 # Настройки LLM
 LLM_MODEL=openai/gpt-4o-mini
+LLM_FALLBACK_MODELS=
 
 # Сетевые настройки и вебхуки
 CADDY_DOMAIN=your-domain.sslip.io
 BASE_URL=https://your-domain.sslip.io
 WEBHOOK_SECRET=your_webhook_secret
-ALLOWED_ORIGINS=*
+ALLOWED_ORIGINS=
 
-# Авторизация (необязательно)
+# Авторизация (обязательна для новой базы)
 AUTH_USERNAME=admin
 AUTH_PASSWORD=your_secure_password
 SECRET_KEY=your_random_secret_key
@@ -64,6 +65,11 @@ SECRET_KEY=your_random_secret_key
 JOB_TTL_DAYS=30
 DB_PATH=backend/data/jobs.db
 DEFAULT_USER=test
+MAX_UPLOAD_BYTES=1073741824
+MAX_RENDER_TEXT_CHARS=2000000
+MAX_ACTIVE_JOBS_PER_USER=3
+APP_UID=1000
+APP_GID=1000
 ```
 
 ---
@@ -72,15 +78,20 @@ DEFAULT_USER=test
 
 Приложение полностью контейнеризировано и запускается **одной командой**:
 
-1. Создайте и заполните файл `.env` (на основе примера `.env.example`).
-2. Запустите сервис:
+1. Создайте и заполните файл `.env` (на основе примера `.env.example`). Обязательно задайте стойкие `AUTH_PASSWORD`, `SECRET_KEY` и, при использовании webhook, `WEBHOOK_SECRET`.
+2. Узнайте UID/GID владельца каталогов (`id -u`, `id -g`), внесите их в
+   `APP_UID`/`APP_GID`, создайте `backend/data` и `backend/logs` с тем же владельцем.
+3. Запустите production preflight, резервное копирование, сборку и проверку готовности:
    ```bash
-   docker compose up -d --build
+   chmod 600 .env
+   ./scripts/deploy.sh
    ```
 
 ### Управление сервисом:
 - **Просмотр логов:** `docker compose logs -f`
 - **Остановка:** `docker compose down`
+- **Проверка процесса:** `curl -i https://your-domain.sslip.io/health`
+- **Проверка готовности:** `curl -i https://your-domain.sslip.io/ready`
 
 После запуска Caddy автоматически выпустит бесплатный SSL-сертификат (Let's Encrypt), и сервис будет доступен по защищённому адресу **`https://your-domain.sslip.io`** (порты 80 и 443).
 
@@ -88,7 +99,7 @@ DEFAULT_USER=test
 
 ## Управление пользователями (CLI)
 
-Аккаунты хранятся в базе данных SQLite (хеши паролей salted SHA-256). Управлять ими можно без перезапуска сервера через CLI-утилиту.
+Аккаунты хранятся в SQLite; пароли защищены PBKDF2-HMAC-SHA256 с индивидуальной солью. Управлять ими можно без перезапуска сервера через CLI-утилиту. Смена пароля отзывает все ранее выданные сессии пользователя.
 Если приложение запущено через Docker, выполняйте команды внутри контейнера `judge-helper`:
 
 ```bash
@@ -96,16 +107,23 @@ DEFAULT_USER=test
 docker compose exec judge-helper python -m backend.cli list-users
 
 # Создать нового пользователя
-docker compose exec judge-helper python -m backend.cli add-user username "password123" --display-name "Имя"
+docker compose exec judge-helper python -m backend.cli add-user username --display-name "Имя"
 
 # Сменить пароль
-docker compose exec judge-helper python -m backend.cli change-password username "new_password"
+docker compose exec judge-helper python -m backend.cli change-password username
 
 # Удалить пользователя
 docker compose exec judge-helper python -m backend.cli delete-user username
 ```
 
 *При локальном запуске (без Docker) просто опускайте `docker compose exec judge-helper`.*
+
+## Конфиденциальность и хранение
+
+- Аудио передаётся в AssemblyAI, а стенограмма — в выбранную модель OpenRouter. Перечисляйте в `LLM_FALLBACK_MODELS` только одобренные модели и провайдеров.
+- Сырая стенограмма не сохраняется приложением после формирования результата. Готовый черновик хранится в SQLite в течение `JOB_TTL_DAYS` дней.
+- SQLite и резервные копии следует хранить на зашифрованном диске с доступом только администратора сервера.
+- Для bind-mount каталогов `backend/data` и `backend/logs` значения `APP_UID`/`APP_GID` должны совпадать с их владельцем на сервере.
 
 ---
 

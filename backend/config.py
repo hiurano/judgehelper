@@ -9,8 +9,8 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).parent
 PROJECT_DIR = BACKEND_DIR.parent
-LOGS_DIR = BACKEND_DIR / "logs"
-LOGS_DIR.mkdir(exist_ok=True)
+LOGS_DIR = Path(os.environ.get("LOGS_DIR") or BACKEND_DIR / "logs")
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOGS_DIR / "app.log"
 
 logging.basicConfig(
@@ -41,7 +41,7 @@ ASSEMBLYAI_KEY = os.environ.get("ASSEMBLYAI_API_KEY", "")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BASE_URL = os.environ.get("BASE_URL", "").rstrip("/")
-ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 MODEL = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
@@ -49,15 +49,27 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "")
 DB_PATH = os.environ.get("DB_PATH") or str(BACKEND_DIR / "data" / "jobs.db")
 JOB_TTL_DAYS = int(os.environ.get("JOB_TTL_DAYS", "30"))
 DEFAULT_USER = os.environ.get("DEFAULT_USER", "admin")
-MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
+MAX_RENDER_TEXT_CHARS = int(os.environ.get("MAX_RENDER_TEXT_CHARS", "2000000"))
+MAX_ACTIVE_JOBS_PER_USER = int(os.environ.get("MAX_ACTIVE_JOBS_PER_USER", "3"))
+for _name, _value in (
+    ("JOB_TTL_DAYS", JOB_TTL_DAYS),
+    ("MAX_UPLOAD_BYTES", MAX_UPLOAD_BYTES),
+    ("MAX_RENDER_TEXT_CHARS", MAX_RENDER_TEXT_CHARS),
+    ("MAX_ACTIVE_JOBS_PER_USER", MAX_ACTIVE_JOBS_PER_USER),
+):
+    if _value <= 0:
+        raise ValueError(f"{_name} must be greater than zero")
 
 # Models tried in order; first success wins.
-LLM_FALLBACK_CHAIN: list[str] = list(dict.fromkeys([
-    MODEL,
-    "openai/gpt-4o-mini",
-    "google/gemini-2.5-flash",
-    "anthropic/claude-3-haiku",
-]))
+# Cross-provider fallbacks can change the processor of sensitive court data.
+# They are therefore opt-in and must be explicitly listed by the operator.
+_fallback_models = [
+    item.strip()
+    for item in os.environ.get("LLM_FALLBACK_MODELS", "").split(",")
+    if item.strip()
+]
+LLM_FALLBACK_CHAIN: list[str] = list(dict.fromkeys([MODEL, *_fallback_models]))
 
 SYSTEM_PROMPT_PATH = PROJECT_DIR / "prompts" / "system-protocol.md"
 SYSTEM_PROMPT_EXAMPLE_PATH = PROJECT_DIR / "prompts" / "system-protocol.md.example"
