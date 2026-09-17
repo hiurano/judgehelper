@@ -41,8 +41,11 @@ def main() -> int:
     errors: list[str] = []
     placeholders = ("your_", "example.com", "your-domain")
 
-    if env_path.stat().st_mode & 0o077:
-        errors.append(".env must not be readable or writable by group/others (use chmod 600 .env)")
+    if env_path.stat().st_mode & 0o027:
+        errors.append(
+            ".env must not be writable by group or accessible by others "
+            "(use 600, or root:service-group with 640)"
+        )
 
     for key in ("ASSEMBLYAI_API_KEY", "OPENROUTER_API_KEY", "AUTH_USERNAME"):
         value = env.get(key, "")
