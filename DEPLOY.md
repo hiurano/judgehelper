@@ -53,7 +53,7 @@ git push origin main
 
 3. **Стянуть последние изменения с GitHub:**
    ```bash
-   git pull origin main
+   git pull --ff-only origin main
    ```
 
 4. **Пересобрать и запустить Docker-контейнеры:**
@@ -71,22 +71,29 @@ git push origin main
 cd /srv/judge-helper && git pull --ff-only origin main && ./scripts/deploy.sh
 ```
 
-Перед первым запуском убедитесь, что каталоги данных принадлежат UID/GID из `.env`:
+Первичная структура production создаётся администратором один раз:
 
 ```bash
-mkdir -p backend/data backend/logs
-id -u
-id -g
-# Внесите полученные числа в APP_UID и APP_GID файла .env, затем:
-chown "$(id -u):$(id -g)" backend/data backend/logs
-chmod 600 .env
+install -d -o root -g judge-helper -m 0750 /etc/judge-helper
+install -d -o judge-helper -g judge-helper -m 0770 \
+  /var/lib/judge-helper /var/log/judge-helper /var/backups/judge-helper
 ```
+
+Файл `/srv/judge-helper/.env` является ссылкой на
+`/etc/judge-helper/judge-helper.env` (`root:judge-helper`, mode `640`).
 
 Скрипт `deploy.sh` перед обновлением:
 
 1. проверяет обязательные секреты, домен, права на `.env` и каталоги данных;
-2. создаёт согласованную резервную копию SQLite в `backend/data/backups/`;
+2. создаёт согласованную резервную копию SQLite в `/var/backups/judge-helper/`;
 3. проверяет конфигурацию Compose, пересобирает контейнеры и ждёт успешного `/ready`.
+
+Ежедневный backup выполняет `judge-helper-backup.timer`. Проверка расписания:
+
+```bash
+systemctl list-timers judge-helper-backup.timer
+journalctl -u judge-helper-backup.service --since today
+```
 
 ---
 

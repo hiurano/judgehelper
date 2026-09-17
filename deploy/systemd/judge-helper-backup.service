@@ -1,0 +1,18 @@
+[Unit]
+Description=Judge Helper SQLite backup
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+SupplementaryGroups=judge-helper
+WorkingDirectory=/srv/judge-helper
+ExecStart=/usr/bin/python3 -m scripts.backup_db
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/etc/judge-helper /var/lib/judge-helper
+ReadWritePaths=/var/backups/judge-helper
+
