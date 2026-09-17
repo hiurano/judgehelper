@@ -1,15 +1,17 @@
 # Памятка по деплою (Judge Helper)
 
-Инструкция по отправке изменений и обновлению продакшн-сервера Google Cloud.
+Инструкция по отправке изменений и обновлению продакшн-сервера `buyerly-prod`.
 
 ---
 
 ## 📌 Параметры окружения
 
-* **Сервер IP:** `34.42.63.241`
-* **Домен:** `https://34.42.63.241.sslip.io`
+* **Сервер IP:** `82.40.57.223`
+* **Домен:** `https://82.40.57.223.sslip.io`
 * **Репозиторий:** `origin main` (GitHub)
-* **Пользователь SSH:** `hiurano`
+* **SSH alias:** `buyerly`
+* **Пользователь SSH:** `claude`
+* **Каталог проекта:** `/home/claude/judge-helper`
 
 ---
 
@@ -37,12 +39,12 @@ git push origin main
 
 1. **Подключиться к серверу по SSH:**
    ```bash
-   ssh hiurano@34.42.63.241
+   ssh buyerly
    ```
 
 2. **Перейти в папку проекта:**
    ```bash
-   cd judge-helper
+   cd /home/claude/judge-helper
    ```
 
 3. **Стянуть последние изменения с GitHub:**
@@ -62,7 +64,7 @@ git push origin main
 После подключения по SSH можно запустить всё сразу одной строкой:
 
 ```bash
-cd judge-helper && git pull origin main && ./scripts/deploy.sh
+cd /home/claude/judge-helper && git pull origin main && ./scripts/deploy.sh
 ```
 
 Перед первым запуском убедитесь, что каталоги данных принадлежат UID/GID из `.env`:
@@ -99,15 +101,15 @@ chmod 600 .env
 
 * **Проверка доступности веб-сервера через curl:**
   ```bash
-  curl -i https://34.42.63.241.sslip.io/health
-  curl -i https://34.42.63.241.sslip.io/ready
+  curl -i https://82.40.57.223.sslip.io/health
+  curl -i https://82.40.57.223.sslip.io/ready
   ```
 
   `/health` подтверждает работу процесса, `/ready` возвращает `200`, только когда
   обязательная конфигурация и хотя бы один пользователь действительно готовы.
 
 * **В браузере:**
-  Перейти по адресу `https://34.42.63.241.sslip.io` и обновить страницу с очисткой кэша (`Ctrl + Shift + R` или `Cmd + Shift + R`).
+  Перейти по адресу `https://82.40.57.223.sslip.io` и обновить страницу с очисткой кэша (`Ctrl + Shift + R` или `Cmd + Shift + R`).
 
 ---
 
@@ -121,7 +123,7 @@ docker compose down
 cp backend/data/jobs.db backend/data/jobs.failed.db
 cp backend/data/backups/jobs-<UTC-время>.db backend/data/jobs.db
 docker compose up -d
-curl -i https://34.42.63.241.sslip.io/ready
+curl -i https://82.40.57.223.sslip.io/ready
 ```
 
 Подставьте имя нужной копии из `backend/data/backups/`. Файл `jobs.failed.db`

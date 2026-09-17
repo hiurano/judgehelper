@@ -98,6 +98,17 @@ def main() -> int:
                 f"{app_uid}:{app_gid}"
             )
 
+    for relative in ("backend/data/jobs.db", "backend/logs/app.log"):
+        runtime_file = ROOT / relative
+        if not runtime_file.exists():
+            continue
+        stat = runtime_file.stat()
+        if stat.st_uid != app_uid or stat.st_gid != app_gid:
+            errors.append(
+                f"{relative} owner is {stat.st_uid}:{stat.st_gid}, expected APP_UID:APP_GID "
+                f"{app_uid}:{app_gid}"
+            )
+
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
