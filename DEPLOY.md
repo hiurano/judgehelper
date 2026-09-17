@@ -10,8 +10,8 @@
 * **Домен:** `https://82.40.57.223.sslip.io`
 * **Репозиторий:** `origin main` (GitHub)
 * **SSH alias:** `serv`
-* **Пользователь SSH:** `claude`
-* **Каталог проекта:** `/home/claude/judge-helper`
+* **Пользователь SSH:** `deploy`
+* **Каталог проекта:** `/home/deploy/judge-helper`
 
 ---
 
@@ -44,7 +44,7 @@ git push origin main
 
 2. **Перейти в папку проекта:**
    ```bash
-   cd /home/claude/judge-helper
+   cd /home/deploy/judge-helper
    ```
 
 3. **Стянуть последние изменения с GitHub:**
@@ -64,7 +64,7 @@ git push origin main
 После подключения по SSH можно запустить всё сразу одной строкой:
 
 ```bash
-cd /home/claude/judge-helper && git pull origin main && ./scripts/deploy.sh
+cd /home/deploy/judge-helper && git pull origin main && ./scripts/deploy.sh
 ```
 
 Перед первым запуском убедитесь, что каталоги данных принадлежат UID/GID из `.env`:
