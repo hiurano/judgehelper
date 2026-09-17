@@ -7,7 +7,8 @@
 - Production URL: `https://82.40.57.223.sslip.io`
 - Сервер: `serv` (`82.40.57.223`), SSH: `ssh serv`
 - Tailscale: `serv.taile2b2a7.ts.net`
-- Каталог на сервере: `/home/claude/judge-helper`
+- Пользователь deployment: `deploy`
+- Каталог на сервере: `/home/deploy/judge-helper`
 - GitHub: `https://github.com/hiurano/judge-helper`, ветка `main`
 - Проверенный релиз: `8cc9702`
 - Последующие служебные коммиты: `5043ede`, `d0b1b67`
@@ -72,9 +73,9 @@
 
 На сервере сохранены:
 
-- `/home/claude/judge-helper/backend/data/backups/predeploy-20260917T221454Z.db`
-- `/home/claude/judge-helper/backend/data/backups/jobs-20260917T221550.809420Z.db`
-- `/home/claude/judge-helper-release-backups/source-20260917T221454Z.tar.gz`
+- `/home/deploy/judge-helper/backend/data/backups/predeploy-20260917T221454Z.db`
+- `/home/deploy/judge-helper/backend/data/backups/jobs-20260917T221550.809420Z.db`
+- `/home/deploy/judge-helper-release-backups/source-20260917T221454Z.tar.gz`
 
 Системные файлы hostname также сохранены с суффиксом
 `before-serv-20260917T222814Z` в `/etc` и `/etc/cloud`.
@@ -87,7 +88,7 @@
    Канонический исправный checkout текущей сессии находился в `/tmp`; GitHub уже содержит
    все коммиты. Нужно заново клонировать репозиторий в постоянный каталог и аккуратно
    перенести локальный `.env`, private prompt и runtime data.
-2. `/home/claude/judge-helper` на сервере также не является Git checkout. Текущий релиз
+2. `/home/deploy/judge-helper` на сервере также не является Git checkout. Текущий релиз
    доставлен проверенным архивом. Нужно либо заново клонировать репозиторий с сохранением
    `.env`, `backend/data`, `backend/logs` и private prompt, либо официально закрепить
    archive-based deployment и исправить `DEPLOY.md` под него.
@@ -118,7 +119,7 @@
 
 ```bash
 ssh serv
-cd /home/claude/judge-helper
+cd /home/deploy/judge-helper
 docker compose ps
 docker compose logs -f judge-helper
 ./scripts/deploy.sh
