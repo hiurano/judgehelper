@@ -4,9 +4,8 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
-User=deploy
-Group=deploy
-SupplementaryGroups=judge-helper
+User=judge-helper
+Group=judge-helper
 WorkingDirectory=/srv/judge-helper
 ExecStart=/usr/bin/python3 -m scripts.backup_db
 NoNewPrivileges=true
@@ -15,4 +14,3 @@ ProtectHome=true
 ProtectSystem=strict
 ReadOnlyPaths=/etc/judge-helper /var/lib/judge-helper
 ReadWritePaths=/var/backups/judge-helper
-
