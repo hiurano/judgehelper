@@ -9,14 +9,14 @@ services:
     restart: unless-stopped
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     env_file:
-      - .env
+      - ${ENV_FILE:-.env}
     dns:
       - 1.1.1.1
       - 8.8.8.8
     volumes:
-      - ./backend/data:/app/backend/data
-      - ./backend/logs:/app/backend/logs
-      - ./prompts:/app/prompts:ro
+      - ${HOST_DATA_DIR:-./backend/data}:/app/backend/data
+      - ${HOST_LOGS_DIR:-./backend/logs}:/app/backend/logs
+      - ${PROMPT_FILE:-./prompts/system-protocol.md}:/app/prompts/system-protocol.md:ro
     read_only: true
     tmpfs:
       - /tmp:size=128m,noexec,nosuid,nodev

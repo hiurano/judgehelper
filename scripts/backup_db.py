@@ -8,6 +8,11 @@ from pathlib import Path
 from scripts.preflight import ROOT, load_env
 
 
+def resolve_host_path(value: str) -> Path:
+    path = Path(value)
+    return path.resolve() if path.is_absolute() else (ROOT / path).resolve()
+
+
 def create_backup(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(source) as src, sqlite3.connect(destination) as dst:
@@ -17,12 +22,13 @@ def create_backup(source: Path, destination: Path) -> None:
 def main() -> int:
     env = load_env(ROOT / ".env")
     configured = Path(env.get("DB_PATH", "backend/data/jobs.db"))
-    source = configured if configured.is_absolute() else ROOT / configured
+    data_dir = resolve_host_path(env.get("HOST_DATA_DIR", "backend/data"))
+    source = data_dir / configured.name
     if not source.exists():
         print("Database does not exist yet; backup skipped.")
         return 0
 
-    backup_dir = ROOT / "backend" / "data" / "backups"
+    backup_dir = resolve_host_path(env.get("BACKUP_DIR", "backend/data/backups"))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     destination = backup_dir / f"jobs-{stamp}.db"
     create_backup(source, destination)
