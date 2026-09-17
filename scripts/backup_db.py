@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import sqlite3
+import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +21,18 @@ def create_backup(source: Path, destination: Path) -> None:
         src.backup(dst)
 
 
+def prune_backups(backup_dir: Path, retention_days: int, *, now: float | None = None) -> int:
+    if retention_days < 1:
+        raise ValueError("BACKUP_RETENTION_DAYS must be at least 1")
+    cutoff = (now if now is not None else time.time()) - retention_days * 86400
+    removed = 0
+    for backup in backup_dir.glob("jobs-*.db"):
+        if backup.is_file() and backup.stat().st_mtime < cutoff:
+            backup.unlink()
+            removed += 1
+    return removed
+
+
 def main() -> int:
     env = load_env(ROOT / ".env")
     configured = Path(env.get("DB_PATH", "backend/data/jobs.db"))
@@ -32,8 +46,18 @@ def main() -> int:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     destination = backup_dir / f"jobs-{stamp}.db"
     create_backup(source, destination)
+    os.chown(destination, -1, backup_dir.stat().st_gid)
+    destination.chmod(0o660)
+
+    try:
+        retention_days = int(env.get("BACKUP_RETENTION_DAYS", "30"))
+        removed = prune_backups(backup_dir, retention_days)
+    except ValueError as exc:
+        raise ValueError("BACKUP_RETENTION_DAYS must be an integer of at least 1") from exc
 
     print(f"Database backup created: {destination}")
+    if removed:
+        print(f"Removed {removed} expired database backup(s).")
     return 0
 
 

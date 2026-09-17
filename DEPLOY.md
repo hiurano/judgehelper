@@ -11,7 +11,11 @@
 * **Репозиторий:** `origin main` (GitHub)
 * **SSH alias:** `serv`
 * **Пользователь SSH:** `deploy`
-* **Каталог проекта:** `/home/deploy/judge-helper`
+* **Каталог проекта:** `/srv/judge-helper`
+* **Конфигурация:** `/etc/judge-helper`
+* **Данные:** `/var/lib/judge-helper`
+* **Логи:** `/var/log/judge-helper`
+* **Резервные копии:** `/var/backups/judge-helper`
 
 ---
 
@@ -44,7 +48,7 @@ git push origin main
 
 2. **Перейти в папку проекта:**
    ```bash
-   cd /home/deploy/judge-helper
+   cd /srv/judge-helper
    ```
 
 3. **Стянуть последние изменения с GitHub:**
@@ -64,7 +68,7 @@ git push origin main
 После подключения по SSH можно запустить всё сразу одной строкой:
 
 ```bash
-cd /home/deploy/judge-helper && git pull origin main && ./scripts/deploy.sh
+cd /srv/judge-helper && git pull --ff-only origin main && ./scripts/deploy.sh
 ```
 
 Перед первым запуском убедитесь, что каталоги данных принадлежат UID/GID из `.env`:
@@ -116,15 +120,15 @@ chmod 600 .env
 ## Откат базы данных
 
 Перед каждым запуском `deploy.sh` база автоматически копируется в
-`backend/data/backups/jobs-<UTC-время>.db`. Если после обновления требуется откат:
+`/var/backups/judge-helper/jobs-<UTC-время>.db`. Если после обновления требуется откат:
 
 ```bash
 docker compose down
-cp backend/data/jobs.db backend/data/jobs.failed.db
-cp backend/data/backups/jobs-<UTC-время>.db backend/data/jobs.db
+cp /var/lib/judge-helper/jobs.db /var/lib/judge-helper/jobs.failed.db
+cp /var/backups/judge-helper/jobs-<UTC-время>.db /var/lib/judge-helper/jobs.db
 docker compose up -d
 curl -i https://82.40.57.223.sslip.io/ready
 ```
 
-Подставьте имя нужной копии из `backend/data/backups/`. Файл `jobs.failed.db`
+Подставьте имя нужной копии из `/var/backups/judge-helper/`. Файл `jobs.failed.db`
 сохраняется для разбора и не удаляется автоматически.

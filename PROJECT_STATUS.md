@@ -8,7 +8,12 @@
 - Сервер: `serv` (`82.40.57.223`), SSH: `ssh serv`
 - Tailscale: `serv.taile2b2a7.ts.net`
 - Пользователь deployment: `deploy`
-- Каталог на сервере: `/home/deploy/judge-helper`
+- Код: `/srv/judge-helper` (полноценный read-only deploy-key Git checkout)
+- Конфигурация: `/etc/judge-helper`
+- Данные: `/var/lib/judge-helper`
+- Логи: `/var/log/judge-helper`
+- Резервные копии: `/var/backups/judge-helper`
+- Системный пользователь приложения: `judge-helper` без shell/login
 - GitHub: `https://github.com/hiurano/judge-helper`, ветка `main`
 - Проверенный релиз: `8cc9702`
 - Последующие служебные коммиты: `5043ede`, `d0b1b67`
@@ -88,38 +93,32 @@
    Канонический исправный checkout текущей сессии находился в `/tmp`; GitHub уже содержит
    все коммиты. Нужно заново клонировать репозиторий в постоянный каталог и аккуратно
    перенести локальный `.env`, private prompt и runtime data.
-2. `/home/deploy/judge-helper` на сервере также не является Git checkout. Текущий релиз
-   доставлен проверенным архивом. Нужно либо заново клонировать репозиторий с сохранением
-   `.env`, `backend/data`, `backend/logs` и private prompt, либо официально закрепить
-   archive-based deployment и исправить `DEPLOY.md` под него.
-3. `pytest` находится в общем `requirements.txt` и попадает в production-образ. Разделить
-   runtime и development/test зависимости.
-4. Добавить lock-файл с хешами или другой воспроизводимый dependency workflow.
-5. Проверить необходимость `build.network: host` и явных публичных DNS на production;
+2. Добавить lock-файл с хешами или другой воспроизводимый dependency workflow.
+3. Проверить необходимость `build.network: host` и явных публичных DNS на production;
    по возможности заменить системной настройкой Docker DNS/firewall.
-6. Добавить автоматический smoke/E2E тест полного пути на тестовом аудиофайле без
+4. Добавить автоматический smoke/E2E тест полного пути на тестовом аудиофайле без
    сохранения конфиденциальных данных.
-7. Настроить регулярное внешнее резервное копирование SQLite и ротацию старых backup-файлов.
-8. Проверить лимиты, расходы и retention данных в кабинетах AssemblyAI/OpenRouter.
-9. API-ключи были переданы открытым текстом в чате. После стабилизации рекомендуется
+5. Настроить копирование SQLite backup за пределы самого сервера.
+6. Проверить лимиты, расходы и retention данных в кабинетах AssemblyAI/OpenRouter.
+7. API-ключи были переданы открытым текстом в чате. После стабилизации рекомендуется
    перевыпустить оба ключа и обновить `.env` локально и на production.
-10. Удалить локальные остановленные тестовые контейнеры/volumes и временные release checkout
+8. Удалить локальные остановленные тестовые контейнеры/volumes и временные release checkout
     только после восстановления постоянного Git checkout.
 
 ## Рекомендуемый порядок следующей чистки
 
-1. Восстановить постоянный Git checkout локально и на сервере.
-2. Разделить runtime/dev dependencies и уменьшить Docker image.
+1. Восстановить постоянный Git checkout локально.
+2. Добавить воспроизводимый lock-файл с хешами.
 3. Нормализовать Compose networking для NixOS и production.
-4. Автоматизировать backup retention и smoke tests.
-5. Провести финальную уборку документации, временных файлов, образов и volumes.
+4. Добавить внешний backup и полный smoke test.
+5. Провести финальную уборку временных файлов, образов и legacy-каталога.
 6. Перевыпустить опубликованные API-ключи и повторить production smoke check.
 
 ## Важные эксплуатационные команды
 
 ```bash
 ssh serv
-cd /home/deploy/judge-helper
+cd /srv/judge-helper
 docker compose ps
 docker compose logs -f judge-helper
 ./scripts/deploy.sh
