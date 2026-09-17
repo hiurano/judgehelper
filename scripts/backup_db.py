@@ -17,7 +17,8 @@ def resolve_host_path(value: str) -> Path:
 
 def create_backup(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(source) as src, sqlite3.connect(destination) as dst:
+    source_uri = f"file:{source.resolve().as_posix()}?mode=ro"
+    with sqlite3.connect(source_uri, uri=True) as src, sqlite3.connect(destination) as dst:
         src.backup(dst)
 
 
