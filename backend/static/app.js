@@ -172,7 +172,6 @@ function pollQueueItem(item) {
                 item.status = 'done';
                 item.phase = 'done';
                 item.draft = data.draft;
-                item.transcript = data.transcript;
                 item.duration_min = data.duration_min;
                 item.speakers_count = data.speakers_count;
                 item.utterances_count = data.utterances_count;

@@ -199,7 +199,7 @@ class JobStore:
         with self._lock, self._conn() as conn:
             if user_id:
                 rows = conn.execute(
-                    "SELECT id, data, updated_at FROM jobs WHERE (user_id = ? OR user_id IS NULL) ORDER BY updated_at DESC LIMIT ?",
+                    "SELECT id, data, updated_at FROM jobs WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?",
                     (user_id, limit),
                 ).fetchall()
             else:
@@ -221,7 +221,7 @@ class JobStore:
     def get_user_stats(self, user_id: str = DEFAULT_USER) -> dict:
         with self._lock, self._conn() as conn:
             rows = conn.execute(
-                "SELECT data FROM jobs WHERE (user_id = ? OR user_id IS NULL)", (user_id,)
+                "SELECT data FROM jobs WHERE user_id = ?", (user_id,)
             ).fetchall()
         total_count = 0
         total_sec = 0.0
@@ -239,6 +239,36 @@ class JobStore:
             "total_protocols": total_count,
             "total_duration_min": total_min,
         }
+
+    def count_active_for_user(self, user_id: str) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE user_id = ? AND status = 'processing'",
+                (user_id,),
+            ).fetchone()
+        return int(row[0])
+
+    def create_if_under_active_limit(
+        self, job_id: str, data: dict, max_active: int
+    ) -> bool:
+        """Atomically reserve a processing slot for a user in this process."""
+        payload = json.dumps(data, ensure_ascii=False, default=str)
+        ts = int(time.time())
+        user_id = data.get("user_id", DEFAULT_USER)
+        with self._lock, self._conn() as conn:
+            active = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE user_id = ? AND status = 'processing'",
+                (user_id,),
+            ).fetchone()[0]
+            if active >= max_active:
+                return False
+            conn.execute(
+                """INSERT INTO jobs
+                   (id, data, updated_at, user_id, status, aai_transcript_id)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (job_id, payload, ts, user_id, data.get("status"), None),
+            )
+        return True
 
 
 # --- UserStore -------------------------------------------------------------
@@ -260,9 +290,15 @@ class UserStore:
                     username TEXT PRIMARY KEY,
                     password_hash TEXT NOT NULL,
                     display_name TEXT,
-                    created_at INTEGER NOT NULL
+                    created_at INTEGER NOT NULL,
+                    session_version INTEGER NOT NULL DEFAULT 1
                 )"""
             )
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+            if "session_version" not in cols:
+                conn.execute(
+                    "ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1"
+                )
 
     @contextmanager
     def _conn(self):
@@ -325,6 +361,21 @@ class UserStore:
             ).fetchone()
         return row is not None
 
+    def get_session_version(self, username: str) -> Optional[int]:
+        """Return the token generation for a user, or None for an unknown user."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT session_version FROM users WHERE username = ?", (username,)
+            ).fetchone()
+        return int(row[0]) if row else None
+
+    def get_display_name(self, username: str) -> Optional[str]:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT display_name FROM users WHERE username = ?", (username,)
+            ).fetchone()
+        return row[0] if row else None
+
     def delete_user(self, username: str) -> bool:
         """Delete a user account."""
         with self._lock, self._conn() as conn:
@@ -340,11 +391,13 @@ class UserStore:
         return [{"username": r[0], "display_name": r[1], "created_at": r[2]} for r in rows]
 
     def change_password(self, username: str, new_password: str) -> bool:
-        """Change a user's password."""
+        """Change a password and revoke all existing sessions for the user."""
         pw_hash = hash_password(new_password)
         with self._lock, self._conn() as conn:
             cur = conn.execute(
-                "UPDATE users SET password_hash = ? WHERE username = ?",
+                """UPDATE users
+                   SET password_hash = ?, session_version = session_version + 1
+                   WHERE username = ?""",
                 (pw_hash, username),
             )
             return cur.rowcount > 0

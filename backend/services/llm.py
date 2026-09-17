@@ -27,6 +27,15 @@ def split_transcript_into_chunks(formatted_text: str, max_chunk_chars: int = 120
     current_length = 0
 
     for para in paragraphs:
+        if len(para) > max_chunk_chars:
+            if current_chunk:
+                chunks.append("\n\n".join(current_chunk))
+                current_chunk = []
+                current_length = 0
+            # A single unusually long utterance must not bypass the model limit.
+            for start in range(0, len(para), max_chunk_chars):
+                chunks.append(para[start:start + max_chunk_chars])
+            continue
         para_len = len(para) + 2  # account for \n\n
         if current_length + para_len > max_chunk_chars and current_chunk:
             chunks.append("\n\n".join(current_chunk))
@@ -65,17 +74,16 @@ async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log
                             "Authorization": f"Bearer {OPENROUTER_KEY}",
                             "Content-Type": "application/json",
                             "HTTP-Referer": "https://github.com/hiurano/judge-helper",
-                            "X-Title": "Judge Helper",
+                            "X-OpenRouter-Title": "Judge Helper",
                         },
                         json={
                             "model": model,
-                            "max_tokens": 16000,
+                            "max_completion_tokens": 16000,
                             "temperature": 0.3,
                             "messages": current_messages,
                         },
                     )
-                    if llm_resp.status_code != 200:
-                        raise RuntimeError(f"HTTP {llm_resp.status_code}: {llm_resp.text[:300]}")
+                    llm_resp.raise_for_status()
                     return llm_resp
 
                 # We use a lambda to cleanly pass the current state of messages
@@ -104,7 +112,7 @@ async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log
 
                 full_draft += draft
                 usage = llm_data.get("usage", {})
-                total_usage["prompt_tokens"] = max(total_usage["prompt_tokens"], usage.get("prompt_tokens", 0))
+                total_usage["prompt_tokens"] += usage.get("prompt_tokens", 0)
                 total_usage["completion_tokens"] += usage.get("completion_tokens", 0)
 
                 finish_reason = choices[0].get("finish_reason")

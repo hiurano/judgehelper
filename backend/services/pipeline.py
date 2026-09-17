@@ -13,6 +13,7 @@ from backend.db import get_lock, jobs, remove_lock
 from backend.services.http_client import async_retry, get_shared_client
 from backend.services.llm import call_llm_with_fallback, split_transcript_into_chunks
 from backend.services.text_cleaner import clean_transcript, format_metadata_block
+from backend.services.task_manager import spawn
 
 
 async def process_transcript(job_id: str):
@@ -76,6 +77,8 @@ async def process_transcript(job_id: str):
                 speakers_count = len(speakers) if speakers else (1 if utterances else 0)
                 utterances_count = len(utterances)
                 formatted = clean_transcript(formatted)
+                if not formatted.strip():
+                    raise ValueError("Сервис распознавания вернул пустую стенограмму")
                 duration_min = round((audio_duration_sec or 0) / 60, 1)
 
                 log.info(
@@ -196,7 +199,6 @@ async def process_transcript(job_id: str):
                 existing_done.update({
                     "status": "done",
                     "draft": draft,
-                    "transcript": formatted,
                     "duration_min": duration_min,
                     "speakers_count": speakers_count,
                     "utterances_count": utterances_count,
@@ -207,11 +209,12 @@ async def process_transcript(job_id: str):
                     "phase_detail": "Протокол сформирован",
                 })
                 jobs[job_id] = existing_done
-            except Exception as e:
+            except Exception:
                 log.exception(f"Processing failed for {job_id}")
                 existing.update({
                     "status": "error",
-                    "error": str(e),
+                    "error": "Не удалось завершить обработку. Повторите попытку или обратитесь к администратору.",
+                    "phase": "error",
                 })
                 jobs[job_id] = existing
     finally:
@@ -241,6 +244,6 @@ async def recover_pending_jobs():
                 log.warning(f"[{job_id}] Interrupted during initial upload — marked as error")
             else:
                 log.info(f"[{job_id}] Resuming background processing (phase={phase}, aai_transcript_id={aai_transcript_id})")
-                asyncio.create_task(process_transcript(job_id))
+                spawn(process_transcript(job_id), name=f"recover:{job_id}")
     except Exception as e:
         log.exception(f"Error recovering pending jobs: {e}")

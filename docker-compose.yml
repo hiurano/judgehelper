@@ -3,25 +3,57 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # NixOS/Tailscale may expose MagicDNS only on the host namespace.
+      network: host
     container_name: judge-helper
     restart: unless-stopped
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     env_file:
       - .env
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     volumes:
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
+      - ./prompts:/app/prompts:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
   caddy:
-    image: caddy:latest
+    image: caddy:2.11.4-alpine
     container_name: judge-helper-caddy
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     ports:
       - "80:80"
       - "443:443"
     command: caddy reverse-proxy --from ${CADDY_DOMAIN:-your-domain.sslip.io} --to judge-helper:8000
+    depends_on:
+      judge-helper:
+        condition: service_healthy
     volumes:
       - caddy_data:/data
       - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
 
 volumes:
   caddy_data:

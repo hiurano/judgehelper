@@ -78,6 +78,14 @@ def test_job_store_get_pending_jobs(temp_job_store):
     assert pending[0]["phase"] == "transcribing"
 
 
+def test_job_store_reserves_active_slots_atomically(temp_job_store):
+    first = {"status": "processing", "user_id": "alice"}
+    second = {"status": "processing", "user_id": "alice"}
+    assert temp_job_store.create_if_under_active_limit("job-1", first, 1) is True
+    assert temp_job_store.create_if_under_active_limit("job-2", second, 1) is False
+    assert "job-2" not in temp_job_store
+
+
 def test_password_hashing_and_legacy_upgrade(tmp_path):
     import hashlib
     from backend.db import UserStore, hash_password, verify_password
@@ -117,3 +125,12 @@ def test_password_hashing_and_legacy_upgrade(tmp_path):
     # Subsequent login works with upgraded hash
     assert store.verify("legacy_user", pwd) is True
 
+
+def test_password_change_increments_session_version(tmp_path):
+    from backend.db import UserStore
+
+    store = UserStore(str(tmp_path / "users.db"))
+    assert store.create_user("alice", "old-password")
+    original = store.get_session_version("alice")
+    assert store.change_password("alice", "new-password")
+    assert store.get_session_version("alice") == original + 1
