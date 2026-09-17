@@ -10,6 +10,11 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def resolve_host_path(value: str) -> Path:
+    path = Path(value)
+    return path.resolve() if path.is_absolute() else (ROOT / path).resolve()
+
+
 def load_env(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.is_file():
@@ -70,14 +75,12 @@ def main() -> int:
         errors.append("ALLOWED_ORIGINS must not contain * in production")
 
     db_path = Path(env.get("DB_PATH", "backend/data/jobs.db"))
-    resolved_db = (ROOT / db_path).resolve() if not db_path.is_absolute() else db_path.resolve()
-    data_root = (ROOT / "backend/data").resolve()
-    if resolved_db != data_root / "jobs.db" and data_root not in resolved_db.parents:
-        errors.append("DB_PATH must point inside backend/data so Docker persists it")
+    if db_path.is_absolute() or db_path.parent.as_posix() != "backend/data":
+        errors.append("DB_PATH must point directly inside backend/data in the container")
 
-    prompt = ROOT / "prompts" / "system-protocol.md"
+    prompt = resolve_host_path(env.get("PROMPT_FILE", "prompts/system-protocol.md"))
     if not prompt.is_file() or not prompt.read_text(encoding="utf-8").strip():
-        errors.append("prompts/system-protocol.md is missing or empty")
+        errors.append(f"PROMPT_FILE is missing or empty: {prompt}")
 
     try:
         app_uid = int(env.get("APP_UID", "1000"))
@@ -86,26 +89,32 @@ def main() -> int:
         errors.append("APP_UID and APP_GID must be integers")
         app_uid = app_gid = -1
 
-    for relative in ("backend/data", "backend/logs"):
-        directory = ROOT / relative
+    runtime_dirs = {
+        "HOST_DATA_DIR": resolve_host_path(env.get("HOST_DATA_DIR", "backend/data")),
+        "HOST_LOGS_DIR": resolve_host_path(env.get("HOST_LOGS_DIR", "backend/logs")),
+    }
+    for key, directory in runtime_dirs.items():
         directory.mkdir(parents=True, exist_ok=True)
         if not os.access(directory, os.W_OK):
-            errors.append(f"{relative} is not writable by the current user")
+            errors.append(f"{key} is not writable by the current user: {directory}")
         stat = directory.stat()
         if stat.st_uid != app_uid or stat.st_gid != app_gid:
             errors.append(
-                f"{relative} owner is {stat.st_uid}:{stat.st_gid}, expected APP_UID:APP_GID "
+                f"{key} owner is {stat.st_uid}:{stat.st_gid}, expected APP_UID:APP_GID "
                 f"{app_uid}:{app_gid}"
             )
 
-    for relative in ("backend/data/jobs.db", "backend/logs/app.log"):
-        runtime_file = ROOT / relative
+    runtime_files = {
+        "database": runtime_dirs["HOST_DATA_DIR"] / db_path.name,
+        "log": runtime_dirs["HOST_LOGS_DIR"] / "app.log",
+    }
+    for label, runtime_file in runtime_files.items():
         if not runtime_file.exists():
             continue
         stat = runtime_file.stat()
         if stat.st_uid != app_uid or stat.st_gid != app_gid:
             errors.append(
-                f"{relative} owner is {stat.st_uid}:{stat.st_gid}, expected APP_UID:APP_GID "
+                f"{label} file owner is {stat.st_uid}:{stat.st_gid}, expected APP_UID:APP_GID "
                 f"{app_uid}:{app_gid}"
             )
 
