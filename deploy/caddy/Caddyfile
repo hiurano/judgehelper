@@ -1,0 +1,10 @@
+# Reverse proxy for Judge Helper.
+# CADDY_DOMAIN comes from the environment (see docker-compose.yml).
+
+{$CADDY_DOMAIN} {
+	reverse_proxy judge-helper:8000
+}
+
+www.{$CADDY_DOMAIN} {
+	redir https://{$CADDY_DOMAIN}{uri} permanent
+}
