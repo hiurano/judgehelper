@@ -5,6 +5,9 @@ services:
       dockerfile: Dockerfile
       # NixOS/Tailscale may expose MagicDNS only on the host namespace.
       network: host
+    # Explicit tag so deploy.sh can keep the previous build under a rollback
+    # tag and point this one back at it when a rollout fails.
+    image: judge-helper:latest
     container_name: judge-helper
     restart: unless-stopped
     user: "${APP_UID:-1000}:${APP_GID:-1000}"

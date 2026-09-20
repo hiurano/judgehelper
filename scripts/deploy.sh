@@ -71,23 +71,74 @@ run_backup() {
         python:3.12-slim python -m scripts.backup_db
 }
 
+app_image="judge-helper:latest"
+rollback_image="judge-helper:rollback"
+
+wait_for_ready() {
+    local attempt
+    for attempt in $(seq 1 30); do
+        if docker compose exec -T judge-helper python -c \
+            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)" \
+            >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
 run_python -m scripts.preflight
 run_backup
 docker compose config --quiet
+
+# Keep whatever is serving right now, so a bad rollout has somewhere to return
+# to. Resolve it from the running container rather than from a tag: the tag may
+# not exist yet, and the container is the honest answer to what is live.
+rollback_available=0
+current_container="$(docker compose ps --quiet judge-helper 2>/dev/null | head -n 1)"
+if [ -n "$current_container" ]; then
+    current_image="$(docker inspect --format '{{.Image}}' "$current_container" 2>/dev/null || true)"
+    if [ -n "$current_image" ]; then
+        docker tag "$current_image" "$rollback_image"
+        rollback_available=1
+    fi
+fi
+if [ "$rollback_available" = "0" ]; then
+    echo "Nothing is running yet; this deploy cannot be rolled back."
+fi
+
 docker compose build --pull
-docker compose up -d --remove-orphans
+
+# compose exits non-zero when a dependency never turns healthy. Under set -e
+# that would abort the script before it can diagnose or roll back, so keep
+# going and let the readiness check below decide.
+docker compose up -d --remove-orphans || true
 
 echo "Waiting for the backend readiness check..."
-for attempt in $(seq 1 30); do
-    if docker compose exec -T judge-helper python -c \
-        "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)"; then
-        docker compose ps
-        echo "Deployment completed successfully."
-        exit 0
-    fi
-    sleep 2
-done
+if wait_for_ready; then
+    docker compose ps
+    echo "Deployment completed successfully."
+    exit 0
+fi
 
-docker compose logs --tail=100 judge-helper
 echo "Deployment failed: backend did not become ready." >&2
+docker compose logs --tail=100 judge-helper >&2
+
+if [ "$rollback_available" = "0" ]; then
+    echo "No previous image to roll back to; the service is down." >&2
+    exit 1
+fi
+
+echo "Rolling back to the previous image..." >&2
+docker tag "$rollback_image" "$app_image"
+docker compose up -d --force-recreate --no-build >&2 || true
+
+if wait_for_ready; then
+    docker compose ps
+    echo "Rolled back to the previous image. The new build was NOT deployed." >&2
+    exit 1
+fi
+
+echo "Rollback failed as well; the service is down and needs a human." >&2
+docker compose logs --tail=100 judge-helper >&2
 exit 1
