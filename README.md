@@ -51,8 +51,8 @@ LLM_MODEL=openai/gpt-4o-mini
 LLM_FALLBACK_MODELS=
 
 # Сетевые настройки и вебхуки
-CADDY_DOMAIN=your-domain.sslip.io
-BASE_URL=https://your-domain.sslip.io
+CADDY_DOMAIN=judgehelper.ru
+BASE_URL=https://judgehelper.ru
 WEBHOOK_SECRET=your_webhook_secret
 ALLOWED_ORIGINS=
 
@@ -90,10 +90,13 @@ APP_GID=1000
 ### Управление сервисом:
 - **Просмотр логов:** `docker compose logs -f`
 - **Остановка:** `docker compose down`
-- **Проверка процесса:** `curl -i https://your-domain.sslip.io/health`
-- **Проверка готовности:** `curl -i https://your-domain.sslip.io/ready`
+- **Проверка процесса:** `curl -i https://judgehelper.ru/health`
+- **Проверка готовности:** `curl -i https://judgehelper.ru/ready`
 
-После запуска Caddy автоматически выпустит бесплатный SSL-сертификат (Let's Encrypt), и сервис будет доступен по защищённому адресу **`https://your-domain.sslip.io`** (порты 80 и 443).
+После запуска Caddy автоматически выпустит бесплатный SSL-сертификат (Let's Encrypt), и сервис будет доступен по защищённому адресу **`https://judgehelper.ru`** (порты 80 и 443).
+
+Конфигурация reverse proxy лежит в `deploy/caddy/Caddyfile`: имя хоста берётся из
+`CADDY_DOMAIN`, а `www.<домен>` отдаёт постоянный редирект на основной адрес.
 
 ---
 

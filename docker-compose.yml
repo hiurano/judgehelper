@@ -41,11 +41,14 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    command: caddy reverse-proxy --from ${CADDY_DOMAIN:-your-domain.sslip.io} --to judge-helper:8000
+    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:?CADDY_DOMAIN must be set}
     depends_on:
       judge-helper:
         condition: service_healthy
     volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     security_opt:

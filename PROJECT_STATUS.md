@@ -4,7 +4,7 @@
 
 ## Текущее состояние
 
-- Production URL: `https://82.40.57.223.sslip.io`
+- Production URL: `https://judgehelper.ru`
 - Сервер: `serv` (`82.40.57.223`), SSH: `ssh serv`
 - Tailscale: `serv.taile2b2a7.ts.net`
 - Пользователь deployment: `deploy`
@@ -125,6 +125,6 @@ docker compose logs -f judge-helper
 Публичная проверка:
 
 ```bash
-curl -i https://82.40.57.223.sslip.io/health
-curl -i https://82.40.57.223.sslip.io/ready
+curl -i https://judgehelper.ru/health
+curl -i https://judgehelper.ru/ready
 ```

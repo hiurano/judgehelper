@@ -7,7 +7,7 @@
 ## 📌 Параметры окружения
 
 * **Сервер IP:** `82.40.57.223`
-* **Домен:** `https://82.40.57.223.sslip.io`
+* **Домен:** `https://judgehelper.ru`
 * **Репозиторий:** `origin main` (GitHub)
 * **SSH alias:** `serv`
 * **Пользователь SSH:** `deploy`
@@ -112,15 +112,57 @@ journalctl -u judge-helper-backup.service --since today
 
 * **Проверка доступности веб-сервера через curl:**
   ```bash
-  curl -i https://82.40.57.223.sslip.io/health
-  curl -i https://82.40.57.223.sslip.io/ready
+  curl -i https://judgehelper.ru/health
+  curl -i https://judgehelper.ru/ready
   ```
 
   `/health` подтверждает работу процесса, `/ready` возвращает `200`, только когда
   обязательная конфигурация и хотя бы один пользователь действительно готовы.
 
 * **В браузере:**
-  Перейти по адресу `https://82.40.57.223.sslip.io` и обновить страницу с очисткой кэша (`Ctrl + Shift + R` или `Cmd + Shift + R`).
+  Перейти по адресу `https://judgehelper.ru` и обновить страницу с очисткой кэша (`Ctrl + Shift + R` или `Cmd + Shift + R`).
+
+---
+
+## 🔐 Домен и TLS
+
+Сайт обслуживается на `judgehelper.ru`. DNS ведётся в панели Timeweb, обе записи
+указывают на сервер:
+
+| Тип | Имя                  | Значение       |
+|-----|----------------------|----------------|
+| A   | `judgehelper.ru`     | `82.40.57.223` |
+| A   | `www.judgehelper.ru` | `82.40.57.223` |
+
+Конфигурация Caddy лежит в `deploy/caddy/Caddyfile` и монтируется в контейнер
+только для чтения. Апекс проксируется на приложение, `www` отдаёт постоянный
+редирект на апекс. Имя хоста подставляется из `CADDY_DOMAIN`, поэтому смена
+домена сводится к правке `/etc/judge-helper/judge-helper.env`.
+
+Сертификат Let's Encrypt Caddy выпускает сам при первом запуске и продлевает
+автоматически; состояние ACME хранится в томе `caddy_data` и переживает
+пересборку. Для выпуска нужны открытые порты 80 и 443 и уже распространившиеся
+DNS-записи.
+
+При смене домена в `/etc/judge-helper/judge-helper.env` меняются две строки
+(`preflight` требует, чтобы они совпадали):
+
+```
+CADDY_DOMAIN=judgehelper.ru
+BASE_URL=https://judgehelper.ru
+```
+
+`BASE_URL` используется не только для ссылок: из него собирается webhook-адрес
+для AssemblyAI. Если он не совпадает с реально доступным извне именем, callback
+не дойдёт и транскрибация свалится в медленный опрос.
+
+Проверка выпущенного сертификата и редиректа:
+
+```bash
+curl -sI https://judgehelper.ru/health | head -1
+curl -sI https://www.judgehelper.ru | grep -i "^location"
+docker compose logs caddy | grep -i "certificate obtained"
+```
 
 ---
 
@@ -134,7 +176,7 @@ docker compose down
 cp /var/lib/judge-helper/jobs.db /var/lib/judge-helper/jobs.failed.db
 cp /var/backups/judge-helper/jobs-<UTC-время>.db /var/lib/judge-helper/jobs.db
 docker compose up -d
-curl -i https://82.40.57.223.sslip.io/ready
+curl -i https://judgehelper.ru/ready
 ```
 
 Подставьте имя нужной копии из `/var/backups/judge-helper/`. Файл `jobs.failed.db`
