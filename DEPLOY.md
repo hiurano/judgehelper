@@ -83,6 +83,18 @@ install -d -o judge-helper -g judge-helper -m 0770 \
 Файл `/srv/judge-helper/.env` является ссылкой на
 `/etc/judge-helper/judge-helper.env` (`root:judge-helper`, mode `640`).
 
+Менять значения в этом файле руками не нужно — для этого есть скрипт, который
+сам снимает резервную копию, сохраняет владельца и права и проверяет результат
+через `preflight`:
+
+```bash
+cd /srv/judge-helper
+./scripts/set-config.sh CADDY_DOMAIN=example.ru BASE_URL=https://example.ru
+```
+
+Значения он не печатает — только имена изменённых ключей. После правки нужен
+обычный деплой, чтобы контейнеры перечитали конфигурацию.
+
 **Root-доступа к серверу нет.** Пароль учётки `deploy` заблокирован
 (`passwd -S deploy` → `L`), поэтому `sudo` из-под неё не работает вообще, а
 пароль root не задан — вход в VNC-консоль HOSTKEY как `root` тоже не проходит.
