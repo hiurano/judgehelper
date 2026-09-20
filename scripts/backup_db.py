@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 import os
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,7 +19,13 @@ def resolve_host_path(value: str) -> Path:
 def create_backup(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     source_uri = f"file:{source.resolve().as_posix()}?mode=ro"
-    with sqlite3.connect(source_uri, uri=True) as src, sqlite3.connect(destination) as dst:
+    # sqlite3's own context manager ends the transaction but leaves the
+    # connection open, so close both explicitly. Note this does not clean
+    # up the source's -wal/-shm sidecars: a mode=ro connection cannot
+    # checkpoint, so they outlive the backup owned by whoever ran it.
+    with closing(sqlite3.connect(source_uri, uri=True)) as src, closing(
+        sqlite3.connect(destination)
+    ) as dst:
         src.backup(dst)
 
 
