@@ -30,8 +30,8 @@ def load_env(path: Path) -> dict[str, str]:
     return values
 
 
-def main() -> int:
-    env_path = ROOT / ".env"
+def main(env_path: Path | None = None) -> int:
+    env_path = env_path or ROOT / ".env"
     try:
         env = load_env(env_path)
     except ValueError as exc:
@@ -107,8 +107,15 @@ def main() -> int:
                 f"{app_uid}:{app_gid}"
             )
 
+    database = runtime_dirs["HOST_DATA_DIR"] / db_path.name
     runtime_files = {
-        "database": runtime_dirs["HOST_DATA_DIR"] / db_path.name,
+        "database": database,
+        # SQLite creates these sidecars as whichever user opens the database.
+        # Left behind by another account they are unusable by the app, which
+        # then fails with a bare "unable to open database file", so name them
+        # here instead of letting the container go unhealthy.
+        "database WAL": database.with_name(database.name + "-wal"),
+        "database shared-memory index": database.with_name(database.name + "-shm"),
         "log": runtime_dirs["HOST_LOGS_DIR"] / "app.log",
     }
     for label, runtime_file in runtime_files.items():

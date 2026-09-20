@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts.backup_db import create_backup, prune_backups
-from scripts.preflight import load_env
+from scripts.preflight import load_env, main
 
 
 def test_load_env_parses_comments_and_quotes(tmp_path):
@@ -57,3 +57,30 @@ def test_prune_backups_only_removes_expired_managed_files(tmp_path):
     assert not old_backup.exists()
     assert recent_backup.exists()
     assert unrelated.exists()
+
+
+def test_preflight_reports_database_sidecar_owned_by_another_user(tmp_path, capsys):
+    """A -wal left behind by a backup run as another user locks the app out."""
+    import os
+
+    data_dir = tmp_path / "data"
+    logs_dir = tmp_path / "logs"
+    data_dir.mkdir()
+    logs_dir.mkdir()
+    (data_dir / "jobs.db").touch()
+    (data_dir / "jobs.db-wal").touch()
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DB_PATH=backend/data/jobs.db\n"
+        f"HOST_DATA_DIR={data_dir}\n"
+        f"HOST_LOGS_DIR={logs_dir}\n"
+        # Anything but the uid owning the files above.
+        f"APP_UID={os.getuid() + 1}\n"
+        f"APP_GID={os.getgid() + 1}\n",
+        encoding="utf-8",
+    )
+    env_file.chmod(0o600)
+
+    assert main(env_file) == 1
+    assert "database WAL file owner" in capsys.readouterr().err
