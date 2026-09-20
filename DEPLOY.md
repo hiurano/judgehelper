@@ -7,7 +7,8 @@
 ## 📌 Параметры окружения
 
 * **Сервер IP:** `82.40.57.223`
-* **Домен:** `https://judgehelper.ru`
+* **Провайдер:** HOSTKEY (панель `invapi.hostkey.ru`), ОС Ubuntu 24.04 LTS
+* **Домен:** `https://judgehelper.ru` (DNS ведётся отдельно, в Timeweb)
 * **Репозиторий:** `origin main` (GitHub)
 * **SSH alias:** `serv`
 * **Пользователь SSH:** `deploy`
@@ -81,6 +82,17 @@ install -d -o judge-helper -g judge-helper -m 0770 \
 
 Файл `/srv/judge-helper/.env` является ссылкой на
 `/etc/judge-helper/judge-helper.env` (`root:judge-helper`, mode `640`).
+
+**Root-доступа к серверу нет.** Пароль учётки `deploy` заблокирован
+(`passwd -S deploy` → `L`), поэтому `sudo` из-под неё не работает вообще, а
+пароль root не задан — вход в VNC-консоль HOSTKEY как `root` тоже не проходит.
+Изменить файлы, принадлежащие root (включая
+`/etc/judge-helper/judge-helper.env`), можно двумя путями: сбросить root-пароль
+в панели HOSTKEY, либо воспользоваться тем, что `deploy` состоит в группе
+`docker`, и запустить контейнер с примонтированным `/etc/judge-helper`. Второй
+способ работает без перезагрузки, но стоит помнить, что членство в группе
+`docker` равносильно root: права `640` на env-файле защищают его от приложения
+и посторонних, но не от самого `deploy`.
 
 Скрипт `deploy.sh` перед обновлением:
 
