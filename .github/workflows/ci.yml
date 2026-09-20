@@ -5,6 +5,7 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -37,3 +38,36 @@ jobs:
       - name: Run Pytest suite
         run: |
           pytest -v
+
+  deploy:
+    # Only once the suite is green, and never from a pull request.
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Never let two deploys overlap. Queue rather than cancel, so a rollout
+    # already touching production is left to finish or roll itself back.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Pinned host key: never accept an unknown one unattended.
+          printf '%s\n' \
+            "82.40.57.223 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILdPcKk9qqKD26umy2Df9n+Z2FefK+DHIuik/WXCFb3T" \
+            > ~/.ssh/known_hosts
+
+      - name: Deploy to production
+        # authorized_keys pins this key to a forced command, so the server
+        # decides what runs; nothing is passed from here.
+        run: |
+          ssh -i ~/.ssh/id_ed25519 \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              deploy@82.40.57.223
