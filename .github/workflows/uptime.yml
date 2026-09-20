@@ -1,0 +1,116 @@
+name: Uptime
+
+# GitHub's scheduler is best-effort: a */10 schedule realistically fires every
+# 10-20 minutes, and GitHub disables scheduled workflows after 60 days without
+# repository activity. Good enough to notice an outage, not a substitute for a
+# real external checker if uptime ever becomes critical.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      SITE: https://judgehelper.ru
+      HOST: judgehelper.ru
+      MIN_CERT_DAYS: "14"
+      ISSUE_TITLE: "Production health check is failing"
+
+    steps:
+      - name: Probe the service
+        id: probe
+        run: |
+          set -uo pipefail
+          failures=""
+          note() { failures="${failures}- $1"$'\n'; }
+
+          for path in /health /ready; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "${SITE}${path}" || echo 000)"
+            if [ "$code" != "200" ]; then
+              note "\`${path}\` returned HTTP ${code}"
+            fi
+          done
+
+          location="$(curl -sSI --max-time 20 "https://www.${HOST}" 2>/dev/null \
+            | awk 'tolower($1) == "location:" { print $2 }' | tr -d '\r')"
+          case "$location" in
+            https://${HOST}/*) ;;
+            *) note "\`www\` redirected to \`${location:-nothing}\`" ;;
+          esac
+
+          expiry="$(echo \
+            | openssl s_client -connect "${HOST}:443" -servername "${HOST}" 2>/dev/null \
+            | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+          if [ -z "$expiry" ]; then
+            note "could not read the TLS certificate"
+          else
+            days=$(( ( $(date -d "$expiry" +%s) - $(date +%s) ) / 86400 ))
+            echo "Certificate expires in ${days} day(s) (${expiry})."
+            if [ "$days" -lt "$MIN_CERT_DAYS" ]; then
+              note "TLS certificate expires in ${days} day(s)"
+            fi
+          fi
+
+          if [ -n "$failures" ]; then
+            {
+              echo "failing=true"
+              echo "details<<REPORT"
+              printf '%s' "$failures"
+              echo "REPORT"
+            } >> "$GITHUB_OUTPUT"
+            echo "Probe failed:"
+            printf '%s' "$failures"
+          else
+            echo "failing=false" >> "$GITHUB_OUTPUT"
+            echo "All checks passed."
+          fi
+
+      - name: Open an issue when the site is unhealthy
+        if: steps.probe.outputs.failing == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DETAILS: ${{ steps.probe.outputs.details }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --state open --json number,title \
+            --jq "[.[] | select(.title == \"$ISSUE_TITLE\") | .number] | first // empty")"
+
+          body="$(printf '%s\n\n%s\n\n%s\n' \
+            "The scheduled probe could not confirm that production is healthy:" \
+            "$DETAILS" \
+            "Run: $RUN_URL")"
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$ISSUE_TITLE" --body "$body"
+          fi
+
+      - name: Close the issue once the site recovers
+        if: steps.probe.outputs.failing == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --state open --json number,title \
+            --jq "[.[] | select(.title == \"$ISSUE_TITLE\") | .number] | first // empty")"
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" \
+              --comment "Production is answering again. Run: $RUN_URL"
+          fi
+
+      - name: Fail the run so the failure is visible
+        if: steps.probe.outputs.failing == 'true'
+        run: exit 1
