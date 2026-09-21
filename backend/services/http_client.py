@@ -2,7 +2,6 @@
 HTTP client management and retry utilities for Judge Helper services.
 """
 import asyncio
-from typing import Optional
 
 try:
     from fastapi import HTTPException

@@ -92,7 +92,7 @@ async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
             log.info(f"[{job_id}] Job deleted during upload — not recreating it")
             return
         log.info(f"[{job_id}] AssemblyAI aai_transcript_id={aai_transcript_id}")
-    except Exception as e:
+    except Exception:
         log.exception(f"[{job_id}] background submit to AssemblyAI failed")
         existing = jobs.get(job_id) or {}
         existing.update({

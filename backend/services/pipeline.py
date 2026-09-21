@@ -1,12 +1,10 @@
 """
 Pipeline orchestration and background job recovery for Judge Helper.
 """
-import asyncio
 import time
 
 from backend.config import (
     ASSEMBLYAI_KEY,
-    DEFAULT_USER,
     JOB_MAX_LIFETIME_HOURS,
     log,
 )
@@ -97,10 +95,6 @@ async def process_transcript(job_id: str):
             if existing.get("status") == "done":
                 return
             metadata = existing.get("metadata", {})
-            user_id = existing.get("user_id", DEFAULT_USER)
-            filename = existing.get("filename", "")
-            created_at = existing.get("created_at", int(time.time()))
-            aai_started_at = existing.get("aai_started_at", created_at)
             audio_duration_sec = existing.get("audio_duration_sec")
             aai_transcript_id = existing.get("aai_transcript_id") or job_id
 

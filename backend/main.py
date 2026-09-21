@@ -43,7 +43,7 @@ from backend.config import (
     get_system_prompt,
     log,
 )
-from backend.db import get_lock, jobs, user_store
+from backend.db import jobs, user_store
 from backend.services.docx_generator import render_docx
 from backend.services.http_client import close_shared_client
 from backend.services.pipeline import process_transcript, recover_pending_jobs

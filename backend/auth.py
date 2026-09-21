@@ -41,7 +41,12 @@ from backend.db import user_store
 SESSION_COOKIE = "judge_helper_session"
 SESSION_DURATION = 60 * 60 * 24 * 30  # 30 days
 LOGIN_WINDOW_SECONDS = 15 * 60
+# Counted per (username, address). Keying on the username alone let anyone who
+# knew it lock the real user out by failing five times from anywhere.
 LOGIN_MAX_FAILURES = 5
+# And per address, so one caller cannot work through a list of usernames with
+# five free guesses each.
+LOGIN_MAX_FAILURES_PER_IP = 20
 
 PUBLIC_PATHS = {
     "/health",
@@ -167,10 +172,32 @@ def _get_login_template() -> str:
     return _login_template_cache
 
 
-def _login_page(error: str = "") -> HTMLResponse:
+def _login_page(error: str = "", status_code: int = 200) -> HTMLResponse:
     block = f'<div class="error">{error}</div>' if error else ""
     html = _get_login_template().replace("__ERROR__", block)
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html, status_code=status_code)
+
+
+def _client_address(request: Optional[Request]) -> str:
+    """The caller's address as uvicorn resolved it behind the proxy.
+
+    Unknown addresses all share one bucket rather than each getting their own
+    unlimited allowance."""
+    client = getattr(request, "client", None) if request is not None else None
+    return getattr(client, "host", None) or "<unknown>"
+
+
+def _recent_failures(key: str, now: float) -> list[float]:
+    """Failures inside the window, pruning what has aged out. Caller holds the lock."""
+    kept = [
+        ts for ts in _login_attempts.get(key, [])
+        if now - ts < LOGIN_WINDOW_SECONDS
+    ]
+    if kept:
+        _login_attempts[key] = kept
+    else:
+        _login_attempts.pop(key, None)
+    return kept
 
 
 async def login_page_handler(request: Request):
@@ -189,7 +216,9 @@ async def login_submit_handler(
     clean_user = (username or "").strip()
     if len(clean_user) > 128 or len(password or "") > 1024:
         return _login_page(error="Неверное имя пользователя или пароль")
-    attempt_key = clean_user.casefold() or "<empty>"
+    address = _client_address(request)
+    user_key = f"user:{clean_user.casefold() or '<empty>'}|{address}"
+    ip_key = f"ip:{address}"
     now = time.monotonic()
     with _login_attempts_lock:
         if len(_login_attempts) > 10_000:
@@ -200,28 +229,31 @@ async def login_submit_handler(
                     _login_attempts[key] = kept
                 else:
                     _login_attempts.pop(key, None)
-        recent = [
-            ts for ts in _login_attempts.get(attempt_key, [])
-            if now - ts < LOGIN_WINDOW_SECONDS
-        ]
-        _login_attempts[attempt_key] = recent
-    if len(recent) >= LOGIN_MAX_FAILURES:
-        log.warning(f"Login rate limit reached: username={clean_user!r}")
-        return JSONResponse(
-            {"detail": "Слишком много попыток входа. Повторите позже."},
+        user_failures = len(_recent_failures(user_key, now))
+        ip_failures = len(_recent_failures(ip_key, now))
+    if user_failures >= LOGIN_MAX_FAILURES or ip_failures >= LOGIN_MAX_FAILURES_PER_IP:
+        log.warning(
+            "Login rate limit reached: username=%r address=%s (%s for this pair, %s from this address)",
+            clean_user, address, user_failures, ip_failures,
+        )
+        # A form post deserves the form back, not raw JSON in the viewport.
+        return _login_page(
+            error="Слишком много попыток входа. Повторите через 15 минут.",
             status_code=429,
-            headers={"Retry-After": str(LOGIN_WINDOW_SECONDS)},
         )
 
     valid = await asyncio.to_thread(verify_user_credentials, clean_user, password)
     if not valid:
         with _login_attempts_lock:
-            _login_attempts.setdefault(attempt_key, []).append(now)
-        log.warning(f"Failed login: username={clean_user!r}")
+            _login_attempts.setdefault(user_key, []).append(now)
+            _login_attempts.setdefault(ip_key, []).append(now)
+        log.warning(f"Failed login: username={clean_user!r} address={address}")
         return _login_page(error="Неверное имя пользователя или пароль")
 
     with _login_attempts_lock:
-        _login_attempts.pop(attempt_key, None)
+        # Only this pair is forgiven: the address keeps its tally, so a
+        # successful login cannot be used to reset a spray in progress.
+        _login_attempts.pop(user_key, None)
 
     token = make_session_token(clean_user)
     resp = RedirectResponse(url="/", status_code=303)

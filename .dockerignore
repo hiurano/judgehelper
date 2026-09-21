@@ -9,6 +9,7 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
+backend/tests/
 backend/data/
 backend/logs/
 *.db
