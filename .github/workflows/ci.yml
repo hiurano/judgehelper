@@ -32,6 +32,9 @@ jobs:
         run: |
           pip-audit -r requirements.txt
 
+      - name: Lint
+        run: ruff check backend scripts
+
       - name: Compile Python sources
         run: python -m compileall -q backend
 

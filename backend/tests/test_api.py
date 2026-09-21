@@ -227,7 +227,6 @@ def test_password_change_revokes_existing_session():
 def test_log_rotation_handler_configured():
     import logging
     from logging.handlers import RotatingFileHandler
-    import backend.config as config
 
     root_logger = logging.getLogger()
     handlers = [h for h in root_logger.handlers if isinstance(h, RotatingFileHandler)]
@@ -348,20 +347,67 @@ def test_ephemeral_dev_session_secret(monkeypatch):
     assert secret1 == secret2  # Consistent for process lifetime
 
 
-def test_login_rate_limit():
+class _RequestFrom:
+    """Just enough of a Request for the login handler's address lookup."""
+
+    def __init__(self, host):
+        self.client = type("Client", (), {"host": host})()
+        self.headers = {}
+        self.url = type("Url", (), {"scheme": "http"})()
+
+
+def _attempt(username, address, password="wrong-password"):
     import asyncio
     import backend.auth as auth_mod
 
-    auth_mod._login_attempts.pop("rate-limit-user", None)
-    for _ in range(auth_mod.LOGIN_MAX_FAILURES):
-        response = asyncio.run(
-            auth_mod.login_submit_handler("rate-limit-user", "wrong-password")
+    return asyncio.run(
+        auth_mod.login_submit_handler(
+            username, password, request=_RequestFrom(address)
         )
-        assert response.status_code == 200
-    limited = asyncio.run(
-        auth_mod.login_submit_handler("rate-limit-user", "wrong-password")
     )
+
+
+def test_login_rate_limit():
+    import backend.auth as auth_mod
+
+    auth_mod._login_attempts.clear()
+    for _ in range(auth_mod.LOGIN_MAX_FAILURES):
+        assert _attempt("rate-limit-user", "10.0.0.1").status_code == 200
+    limited = _attempt("rate-limit-user", "10.0.0.1")
     assert limited.status_code == 429
+    # A form post gets the form back with the message on it, not raw JSON.
+    assert "Слишком много попыток" in limited.body.decode()
+
+
+def test_one_address_cannot_lock_a_user_out_everywhere():
+    """The limit used to key on the username alone.
+
+    Anyone who knew a judge's username could spend five guesses and lock them
+    out of their own account for fifteen minutes."""
+    import backend.auth as auth_mod
+
+    auth_mod._login_attempts.clear()
+    for _ in range(auth_mod.LOGIN_MAX_FAILURES):
+        assert _attempt("targeted-user", "203.0.113.9").status_code == 200
+    assert _attempt("targeted-user", "203.0.113.9").status_code == 429
+
+    # The real user, at their own address, is unaffected.
+    assert _attempt("targeted-user", "198.51.100.4").status_code == 200
+
+
+def test_one_address_cannot_spray_many_usernames():
+    """Per-username counting alone gave each new name five free guesses."""
+    import backend.auth as auth_mod
+
+    auth_mod._login_attempts.clear()
+    statuses = [
+        _attempt(f"sprayed-user-{i}", "203.0.113.77").status_code
+        for i in range(auth_mod.LOGIN_MAX_FAILURES_PER_IP + 1)
+    ]
+
+    assert statuses[-1] == 429
+    assert statuses.count(429) == 1  # exactly one over the allowance
+    auth_mod._login_attempts.clear()
 
 
 def test_allowed_origins_whitespace_stripping():

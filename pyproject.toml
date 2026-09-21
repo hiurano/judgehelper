@@ -7,3 +7,13 @@ testpaths = [
 pythonpath = [
     "."
 ]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# F is pyflakes: unused imports and names, undefined names, f-strings without
+# placeholders. E9 is the syntax and runtime-error set. Everything the review
+# found by hand, CI now finds on its own. Style and import ordering are
+# deliberately left out; adopting them is its own change.
+select = ["F", "E9"]
