@@ -9,6 +9,9 @@ except ImportError:
         @staticmethod
         def fixture(fn):
             return fn
+import json
+import sqlite3
+
 from backend.db import JobStore
 
 
@@ -49,6 +52,52 @@ def test_job_store_aai_id_lookup_and_stats(temp_job_store):
     stats = store.get_user_stats("test")
     assert stats["total_protocols"] == 1
     assert stats["total_duration_min"] == 10.5
+
+
+def test_stats_survive_the_duration_column_migration(tmp_path):
+    """The duration moved out of the JSON blob; production rows predate it.
+
+    The totals on /api/me must read the same before and after the upgrade, so
+    build the old schema by hand and let JobStore migrate it."""
+    db_file = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(db_file))
+    conn.execute(
+        """CREATE TABLE jobs (id TEXT PRIMARY KEY, data TEXT NOT NULL,
+           updated_at INTEGER NOT NULL, user_id TEXT DEFAULT 'test')"""
+    )
+    conn.execute("ALTER TABLE jobs ADD COLUMN status TEXT")
+    conn.execute("ALTER TABLE jobs ADD COLUMN aai_transcript_id TEXT")
+    legacy_rows = [
+        # The pipeline's own field, written once drafting starts.
+        ("job-a", {"status": "done", "user_id": "test", "duration_min": 10.5}),
+        # Older rows only ever carried the recognition service's raw seconds.
+        ("job-b", {"status": "done", "user_id": "test", "audio_duration_sec": 90}),
+        # Unfinished work counts for nothing.
+        ("job-c", {"status": "processing", "user_id": "test", "duration_min": 99}),
+        # Another account's protocol must not leak into these totals.
+        ("job-d", {"status": "done", "user_id": "someone-else", "duration_min": 42}),
+    ]
+    for job_id, data in legacy_rows:
+        conn.execute(
+            "INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?)",
+            (job_id, json.dumps(data, ensure_ascii=False), int(time.time()),
+             data["user_id"], data["status"], None),
+        )
+    conn.commit()
+    conn.close()
+
+    store = JobStore(str(db_file))
+
+    assert store.get_user_stats("test") == {
+        "total_protocols": 2,
+        "total_duration_min": 12.0,  # 10.5 + 1.5
+    }
+    # A row written after the migration keeps the new column in step.
+    store["job-e"] = {"status": "done", "user_id": "test", "duration_min": 3.0}
+    assert store.get_user_stats("test")["total_protocols"] == 3
+    assert store.get_user_stats("test")["total_duration_min"] == 15.0
+    # And the blob is still the source of truth for everything else.
+    assert store.get("job-a")["duration_min"] == 10.5
 
 
 def test_job_store_cleanup_old(temp_job_store):

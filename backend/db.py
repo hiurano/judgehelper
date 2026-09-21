@@ -45,6 +45,22 @@ def verify_password(password: str, stored_hash: str) -> bool:
         return False
 
 
+def duration_seconds(data: dict) -> Optional[float]:
+    """Audio length in seconds, from whichever field the pipeline recorded.
+
+    `duration_min` is what the pipeline writes once it knows; before that only
+    the raw `audio_duration_sec` from the recognition service is there."""
+    for key, scale in (("duration_min", 60.0), ("audio_duration_sec", 1.0)):
+        value = data.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value) * scale
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 class JobStore:
     """Thread-safe SQLite key-value store. API-compatible with `dict[str, dict]`
     for the subset of operations used here: `store[k] = v`, `store.get(k, default)`,
@@ -77,11 +93,32 @@ class JobStore:
                 conn.execute("ALTER TABLE jobs ADD COLUMN status TEXT")
             if "aai_transcript_id" not in cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN aai_transcript_id TEXT")
+            if "duration_sec" not in cols:
+                # Kept beside the blob so the per-user totals never have to read
+                # it. Backfilled once here; the rows are rewritten from then on.
+                conn.execute("ALTER TABLE jobs ADD COLUMN duration_sec REAL")
+                for job_id, data_str in conn.execute("SELECT id, data FROM jobs").fetchall():
+                    try:
+                        seconds = duration_seconds(json.loads(data_str))
+                    except (json.JSONDecodeError, AttributeError):
+                        continue
+                    if seconds is not None:
+                        conn.execute(
+                            "UPDATE jobs SET duration_sec = ? WHERE id = ?",
+                            (seconds, job_id),
+                        )
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_aai_id ON jobs(aai_transcript_id)")
+            # Covering index for the per-user totals: with duration_sec in the
+            # index itself, /api/me is answered without touching the table,
+            # whose rows carry the protocol text.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_user_status "
+                "ON jobs(user_id, status, duration_sec)"
+            )
 
     @contextmanager
     def _conn(self):
@@ -126,17 +163,21 @@ class JobStore:
         user_id = data.get("user_id", DEFAULT_USER)
         status = data.get("status")
         aai_transcript_id = data.get("aai_transcript_id")
-        
+        duration = duration_seconds(data)
+
         with self._lock, self._conn() as conn:
             conn.execute(
-                """INSERT INTO jobs (id, data, updated_at, user_id, status, aai_transcript_id) VALUES (?, ?, ?, ?, ?, ?)
+                """INSERT INTO jobs
+                   (id, data, updated_at, user_id, status, aai_transcript_id, duration_sec)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(id) DO UPDATE SET
                        data = excluded.data,
                        updated_at = excluded.updated_at,
                        user_id = COALESCE(excluded.user_id, jobs.user_id),
                        status = excluded.status,
-                       aai_transcript_id = excluded.aai_transcript_id""",
-                (job_id, payload, ts, user_id, status, aai_transcript_id),
+                       aai_transcript_id = excluded.aai_transcript_id,
+                       duration_sec = excluded.duration_sec""",
+                (job_id, payload, ts, user_id, status, aai_transcript_id, duration),
             )
 
     def update_if_exists(self, job_id: str, data: dict) -> bool:
@@ -152,6 +193,7 @@ class JobStore:
         user_id = data.get("user_id")
         status = data.get("status")
         aai_transcript_id = data.get("aai_transcript_id")
+        duration = duration_seconds(data)
 
         with self._lock, self._conn() as conn:
             cur = conn.execute(
@@ -160,9 +202,10 @@ class JobStore:
                        updated_at = ?,
                        user_id = COALESCE(?, user_id),
                        status = ?,
-                       aai_transcript_id = ?
+                       aai_transcript_id = ?,
+                       duration_sec = ?
                    WHERE id = ?""",
-                (payload, ts, user_id, status, aai_transcript_id, job_id),
+                (payload, ts, user_id, status, aai_transcript_id, duration, job_id),
             )
             updated = cur.rowcount > 0
         return updated
@@ -269,25 +312,21 @@ class JobStore:
         return results
 
     def get_user_stats(self, user_id: str = DEFAULT_USER) -> dict:
-        with self._lock, self._conn() as conn:
-            rows = conn.execute(
-                "SELECT data FROM jobs WHERE user_id = ?", (user_id,)
-            ).fetchall()
-        total_count = 0
-        total_sec = 0.0
-        for (data_str,) in rows:
-            try:
-                data = json.loads(data_str)
-                if data.get("status") == "done":
-                    total_count += 1
-                    dur = data.get("duration_min") or (data.get("audio_duration_sec", 0) / 60.0)
-                    total_sec += (dur * 60.0)
-            except Exception:
-                continue
-        total_min = round(total_sec / 60.0, 1)
+        """Totals for /api/me, read straight from the indexed columns.
+
+        This used to select every row the user owns and JSON-parse it — whole
+        protocols, tens of kilobytes each — only to count the finished ones and
+        add up their durations. /api/me runs on every page load and after every
+        delete, and it all happened on the event loop."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*), COALESCE(SUM(duration_sec), 0)
+                   FROM jobs WHERE user_id = ? AND status = 'done'""",
+                (user_id,),
+            ).fetchone()
         return {
-            "total_protocols": total_count,
-            "total_duration_min": total_min,
+            "total_protocols": int(row[0]),
+            "total_duration_min": round(float(row[1]) / 60.0, 1),
         }
 
     def count_active_for_user(self, user_id: str) -> int:
@@ -314,9 +353,9 @@ class JobStore:
                 return False
             conn.execute(
                 """INSERT INTO jobs
-                   (id, data, updated_at, user_id, status, aai_transcript_id)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (job_id, payload, ts, user_id, data.get("status"), None),
+                   (id, data, updated_at, user_id, status, aai_transcript_id, duration_sec)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (job_id, payload, ts, user_id, data.get("status"), None, duration_seconds(data)),
             )
         return True
 
