@@ -74,6 +74,25 @@ run_backup() {
 app_image="judge-helper:latest"
 rollback_image="judge-helper:rollback"
 
+reload_caddy() {
+    # The Caddyfile is a bind mount: compose sees no reason to recreate the
+    # container when only the file's contents change, and Caddy does not watch
+    # it. Without this a proxy change deploys to disk and nowhere else, while
+    # the rollout reports success because the backend answers fine.
+    if [ -z "$(docker compose ps --quiet caddy 2>/dev/null)" ]; then
+        echo "Caddy is not running; it will pick the config up when it starts."
+        return 0
+    fi
+    echo "Reloading the Caddy configuration..."
+    if docker compose exec -T caddy \
+        caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+        return 0
+    fi
+    # A rejected config leaves the previous one serving, so the site stays up.
+    echo "Caddy refused the new configuration and kept the previous one." >&2
+    return 1
+}
+
 wait_for_ready() {
     local attempt
     for attempt in $(seq 1 30); do
@@ -116,6 +135,14 @@ docker compose up -d --remove-orphans || true
 
 echo "Waiting for the backend readiness check..."
 if wait_for_ready; then
+    # The application is healthy at this point. A proxy config that failed to
+    # load is worth failing the deploy over, but not worth rolling the
+    # application back for: the old proxy config is still serving it.
+    if ! reload_caddy; then
+        docker compose ps
+        echo "Deployment failed: the application is live but Caddy kept its old configuration." >&2
+        exit 1
+    fi
     docker compose ps
     echo "Deployment completed successfully."
     exit 0
@@ -134,6 +161,7 @@ docker tag "$rollback_image" "$app_image"
 docker compose up -d --force-recreate --no-build >&2 || true
 
 if wait_for_ready; then
+    reload_caddy || true
     docker compose ps
     echo "Rolled back to the previous image. The new build was NOT deployed." >&2
     exit 1
