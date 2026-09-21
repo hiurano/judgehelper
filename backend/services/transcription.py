@@ -107,13 +107,95 @@ async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
             file_path.unlink(missing_ok=True)
 
 
+TRANSCRIPT_GONE_MESSAGE = (
+    "Расшифровка больше недоступна на сервисе распознавания. "
+    "Пожалуйста, загрузите запись повторно."
+)
+
+
+async def poll_one_job(client, p_job: dict, semaphore: asyncio.Semaphore) -> None:
+    """Bring one job up to date with what AssemblyAI says about it.
+
+    Lifted out of the polling loop so it can be exercised on its own: it owns
+    the decision to fail a job, which is not something to leave untested."""
+    from backend.services.pipeline import process_transcript
+
+    job_id = p_job.get("id")
+    aai_id = p_job.get("aai_transcript_id")
+    if not aai_id or p_job.get("phase") != "transcribing":
+        return
+
+    # If someone is already processing this job (e.g. webhook just fired), skip
+    lock = get_lock(job_id)
+    if lock.locked():
+        return
+
+    try:
+        async with semaphore:
+            tx_resp = await client.get(
+                f"https://api.assemblyai.com/v2/transcript/{aai_id}",
+                headers={"authorization": ASSEMBLYAI_KEY},
+            )
+        if tx_resp.status_code == 404:
+            # The transcript is gone from AssemblyAI — past its retention
+            # window, or removed. Polling can only repeat this 404, so stop
+            # instead of holding the job's slot until the stall watchdog
+            # notices hours later.
+            gone = jobs.get(job_id)
+            if gone and gone.get("status") not in ("done", "error"):
+                gone.update({
+                    "status": "error",
+                    "phase": "error",
+                    "error": TRANSCRIPT_GONE_MESSAGE,
+                })
+                jobs.update_if_exists(job_id, gone)
+                log.warning(f"[{job_id}] AssemblyAI no longer has transcript {aai_id}")
+            return
+        tx_resp.raise_for_status()
+        aai_body = tx_resp.json()
+
+        aai_status = aai_body.get("status")
+        aai_audio_duration = aai_body.get("audio_duration")
+
+        cached = jobs.get(job_id, {})
+        if not cached or cached.get("status") in ("done", "error"):
+            return
+
+        if aai_audio_duration and not cached.get("audio_duration_sec"):
+            cached["audio_duration_sec"] = aai_audio_duration
+
+        if aai_status == "error":
+            cached.update({
+                "status": "error",
+                "phase": "error",
+                "error": "Сервис распознавания не смог обработать запись.",
+            })
+            jobs.update_if_exists(job_id, cached)
+        elif aai_status == "completed":
+            cached.update({
+                "status": "processing",
+                "phase": "drafting",
+                "drafting_started_at": cached.get("drafting_started_at") or int(time.time()),
+            })
+            if not jobs.update_if_exists(job_id, cached):
+                return
+            if not lock.locked():
+                spawn(process_transcript(job_id), name=f"process:{job_id}")
+        else:
+            cached.update({"aai_status": aai_status})
+            jobs.update_if_exists(job_id, cached)
+
+    except Exception as inner_e:
+        log.error(f"[{job_id}] Polling error: {inner_e}")
+
+
 async def aai_polling_loop():
     """
     Background loop that polls AssemblyAI for pending jobs.
     If webhooks are configured, it runs less frequently as a fallback.
     If webhooks are NOT configured, it polls every 15 seconds.
     """
-    from backend.services.pipeline import fail_stalled_jobs, process_transcript
+    from backend.services.pipeline import fail_stalled_jobs
 
     sleep_interval = 60 if (BASE_URL and WEBHOOK_SECRET) else 15
     while True:
@@ -133,80 +215,9 @@ async def aai_polling_loop():
 
             client = get_shared_client()
             semaphore = asyncio.Semaphore(10)
-
-            async def poll_one(p_job):
-                job_id = p_job.get("id")
-                aai_id = p_job.get("aai_transcript_id")
-                if not aai_id or p_job.get("phase") != "transcribing":
-                    return
-
-                # If someone is already processing this job (e.g. webhook just fired), skip
-                lock = get_lock(job_id)
-                if lock.locked():
-                    return
-
-                try:
-                    async with semaphore:
-                        tx_resp = await client.get(
-                            f"https://api.assemblyai.com/v2/transcript/{aai_id}",
-                            headers={"authorization": ASSEMBLYAI_KEY},
-                        )
-                    if tx_resp.status_code == 404:
-                        # The transcript is gone from AssemblyAI — past its
-                        # retention window, or removed. Polling can only repeat
-                        # this 404, so stop instead of holding the slot until
-                        # the stall watchdog notices hours later.
-                        gone = jobs.get(job_id)
-                        if gone and gone.get("status") not in ("done", "error"):
-                            gone.update({
-                                "status": "error",
-                                "phase": "error",
-                                "error": (
-                                    "Расшифровка больше недоступна на сервисе распознавания. "
-                                    "Пожалуйста, загрузите запись повторно."
-                                ),
-                            })
-                            jobs.update_if_exists(job_id, gone)
-                            log.warning(f"[{job_id}] AssemblyAI no longer has transcript {aai_id}")
-                        return
-                    tx_resp.raise_for_status()
-                    aai_body = tx_resp.json()
-
-                    aai_status = aai_body.get("status")
-                    aai_audio_duration = aai_body.get("audio_duration")
-
-                    cached = jobs.get(job_id, {})
-                    if not cached or cached.get("status") in ("done", "error"):
-                        return
-
-                    if aai_audio_duration and not cached.get("audio_duration_sec"):
-                        cached["audio_duration_sec"] = aai_audio_duration
-
-                    if aai_status == "error":
-                        cached.update({
-                            "status": "error",
-                            "phase": "error",
-                            "error": "Сервис распознавания не смог обработать запись.",
-                        })
-                        jobs.update_if_exists(job_id, cached)
-                    elif aai_status == "completed":
-                        cached.update({
-                            "status": "processing",
-                            "phase": "drafting",
-                            "drafting_started_at": cached.get("drafting_started_at") or int(time.time()),
-                        })
-                        if not jobs.update_if_exists(job_id, cached):
-                            return
-                        if not lock.locked():
-                            spawn(process_transcript(job_id), name=f"process:{job_id}")
-                    else:
-                        cached.update({"aai_status": aai_status})
-                        jobs.update_if_exists(job_id, cached)
-
-                except Exception as inner_e:
-                    log.error(f"[{job_id}] Polling error: {inner_e}")
-
-            await asyncio.gather(*(poll_one(p_job) for p_job in pending))
+            await asyncio.gather(
+                *(poll_one_job(client, p_job, semaphore) for p_job in pending)
+            )
 
         except asyncio.CancelledError:
             break

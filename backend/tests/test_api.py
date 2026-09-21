@@ -185,6 +185,33 @@ def test_status_does_not_expose_another_users_job(auth_client):
     assert delete_response.status_code == 404
 
 
+def test_delete_refuses_another_users_job(auth_client):
+    """Ownership is the only thing between two judges' protocols."""
+    from backend.db import jobs
+
+    jobs["job-of-another"] = {
+        "status": "done",
+        "draft": "Протокол другого судьи",
+        "user_id": "somebody-else",
+    }
+
+    response = auth_client.delete("/jobs/job-of-another")
+
+    # 404, not 403: whether it exists is itself none of the caller's business.
+    assert response.status_code == 404
+    assert jobs.get("job-of-another") is not None
+    jobs.delete("job-of-another")
+
+
+def test_delete_removes_the_callers_own_job(auth_client):
+    from backend.db import jobs
+
+    jobs["job-of-mine"] = {"status": "done", "draft": "Мой протокол", "user_id": "test"}
+
+    assert auth_client.delete("/jobs/job-of-mine").status_code == 200
+    assert jobs.get("job-of-mine") is None
+
+
 def test_recover_pending_jobs():
     import asyncio
     from backend.db import jobs

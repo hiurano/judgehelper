@@ -210,6 +210,100 @@ def test_recover_resumes_a_job_that_reached_transcription(monkeypatch):
     assert jobs.get("job-mid-transcription")["status"] == "processing"
 
 
+# --- Chunked drafting -----------------------------------------------------
+#
+# A hearing long enough to split is the normal case, not the exception, and
+# the pieces have to come back as one protocol with the speakers still
+# identified the same way throughout.
+
+LONG_TRANSCRIPT = {
+    "status": "completed",
+    "audio_duration": 7200,
+    "utterances": [
+        {"speaker": "A" if i % 2 else "B", "text": f"Реплика номер {i}. " * 60}
+        for i in range(30)
+    ],
+}
+
+
+def test_a_long_transcript_is_drafted_in_parts_and_joined(monkeypatch):
+    monkeypatch.setattr(
+        pipeline, "get_shared_client", lambda: _FakeAaiClient(LONG_TRANSCRIPT)
+    )
+    prompts = []
+
+    async def _fake_llm(client, user_msg, log_prefix):
+        prompts.append(user_msg)
+        part = len(prompts)
+        return Draft(
+            f"[КЛЮЧ РОЛЕЙ: Спикер A = Судья]\nЧасть {part} протокола.",
+            "test-model",
+            {"prompt_tokens": 10, "completion_tokens": 20},
+        )
+
+    monkeypatch.setattr(pipeline, "call_llm_with_fallback", _fake_llm)
+
+    jobs["job-long-hearing"] = {
+        "status": "processing",
+        "phase": "transcribing",
+        "user_id": "test",
+        "aai_transcript_id": "aai-long-hearing",
+    }
+    asyncio.run(pipeline.process_transcript("job-long-hearing"))
+
+    stored = jobs.get("job-long-hearing")
+    assert stored["status"] == "done"
+    assert stored["total_chunks"] > 1
+    assert len(prompts) == stored["total_chunks"]
+    assert stored["current_chunk"] == stored["total_chunks"]
+
+    # Every part is in the protocol, in order...
+    for part in range(1, len(prompts) + 1):
+        assert f"Часть {part} протокола." in stored["draft"]
+    positions = [stored["draft"].index(f"Часть {p} протокола.")
+                 for p in range(1, len(prompts) + 1)]
+    assert positions == sorted(positions)
+
+    # ...and the model's bookkeeping line is not part of what the judge reads.
+    assert "КЛЮЧ РОЛЕЙ" not in stored["draft"]
+
+    # The role mapping is carried into the next part so the speakers keep
+    # their identities across the seam.
+    assert "СОХРАНЕННЫЙ МАППИНГ РОЛЕЙ" in prompts[1]
+    assert "Спикер A = Судья" in prompts[1]
+
+    # Usage is summed over the parts, all of which are paid for.
+    assert stored["truncated"] is False
+    jobs.delete("job-long-hearing")
+
+
+def test_one_truncated_part_flags_the_whole_protocol(monkeypatch):
+    monkeypatch.setattr(
+        pipeline, "get_shared_client", lambda: _FakeAaiClient(LONG_TRANSCRIPT)
+    )
+    calls = {"n": 0}
+
+    async def _fake_llm(client, user_msg, log_prefix):
+        calls["n"] += 1
+        # Only the second part runs out of room.
+        return Draft(f"Часть {calls['n']}.", "test-model", {}, truncated=calls["n"] == 2)
+
+    monkeypatch.setattr(pipeline, "call_llm_with_fallback", _fake_llm)
+
+    jobs["job-partly-truncated"] = {
+        "status": "processing",
+        "phase": "transcribing",
+        "user_id": "test",
+        "aai_transcript_id": "aai-partly-truncated",
+    }
+    asyncio.run(pipeline.process_transcript("job-partly-truncated"))
+
+    stored = jobs.get("job-partly-truncated")
+    assert stored["truncated"] is True
+    assert "может быть неполным" in stored["phase_detail"]
+    jobs.delete("job-partly-truncated")
+
+
 # --- The stall watchdog ---------------------------------------------------
 #
 # Nothing else moves a job off `processing` once the step that owned it is
