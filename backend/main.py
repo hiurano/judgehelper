@@ -9,6 +9,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import secrets
+import shutil
 import time
 import urllib.parse
 import uuid
@@ -31,8 +32,6 @@ from backend.config import (
     AUTH_PASSWORD,
     AUTH_USERNAME,
     BACKEND_DIR,
-    BASE_URL,
-    DEFAULT_USER,
     JOB_TTL_DAYS,
     MAX_ACTIVE_JOBS_PER_USER,
     MAX_RENDER_TEXT_CHARS,
@@ -67,6 +66,40 @@ def _looks_like_supported_media(header: bytes) -> bool:
 
 
 UPLOAD_DIR = BACKEND_DIR / "data" / "uploads"
+
+# Uploads share a volume with the database, and one of them can be a gigabyte.
+# Audio filling the disk must not be what stops SQLite being able to write.
+DISK_RESERVE_BYTES = 256 * 1024 * 1024
+OUT_OF_SPACE_MESSAGE = (
+    "На сервере недостаточно места для этой записи. "
+    "Удалите старые протоколы или обратитесь к администратору."
+)
+
+
+def _free_disk_bytes() -> Optional[int]:
+    """Free space on the uploads volume, or None if it cannot be read.
+
+    An unreadable volume is not a reason to refuse the upload: the write
+    itself will fail loudly enough if something is really wrong."""
+    try:
+        return shutil.disk_usage(UPLOAD_DIR).free
+    except OSError:
+        log.warning("Could not read free space on the uploads volume")
+        return None
+
+
+def current_user(request: Request) -> str:
+    """The authenticated username for this request.
+
+    SessionAuthMiddleware sets this for every path that is not public, so
+    reaching a handler without it means the path became public by mistake.
+    Falling back to a default account there would hand that account's
+    protocols to an unauthenticated caller instead of refusing."""
+    user = getattr(request.state, "user", None)
+    if not user:
+        log.error("Handler reached without an authenticated user: %s", request.url.path)
+        raise HTTPException(401, "Не авторизованы")
+    return user
 
 
 def _too_large_message() -> str:
@@ -300,7 +333,18 @@ async def upload(
     if not ASSEMBLYAI_KEY:
         raise HTTPException(500, "AssemblyAI key not configured on server")
 
-    user_id = getattr(request.state, "user", DEFAULT_USER)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    # Refuse now if the declared size clearly will not fit, rather than filling
+    # the volume first and failing on the last chunk.
+    free = _free_disk_bytes()
+    if free is not None and content_length:
+        try:
+            if free - int(content_length) < DISK_RESERVE_BYTES:
+                raise HTTPException(507, OUT_OF_SPACE_MESSAGE)
+        except ValueError:
+            pass
+
+    user_id = current_user(request)
     job_id = "job-" + uuid.uuid4().hex[:24]
     metadata = {"defendant": defendant.strip()}
     initial_job = {
@@ -325,7 +369,7 @@ async def upload(
     size_bytes = 0
     header = b""
     try:
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        checked_at = 0
         with open(file_path, "wb") as f:
             while chunk := await file.read(1024 * 1024):  # 1 MB chunks
                 if not header:
@@ -341,6 +385,14 @@ async def upload(
                 size_bytes += len(chunk)
                 if size_bytes > MAX_UPLOAD_BYTES:
                     raise HTTPException(413, _too_large_message())
+                # Content-Length can be absent or wrong, so keep watching the
+                # volume as the bytes land. Every 64 MB is often enough to stop
+                # well before the reserve is gone.
+                if size_bytes - checked_at >= 64 * 1024 * 1024:
+                    checked_at = size_bytes
+                    remaining = await asyncio.to_thread(_free_disk_bytes)
+                    if remaining is not None and remaining < DISK_RESERVE_BYTES:
+                        raise HTTPException(507, OUT_OF_SPACE_MESSAGE)
 
         if size_bytes == 0:
             raise HTTPException(400, "Загруженный файл пуст")
@@ -410,7 +462,7 @@ async def status(job_id: str, request: Request):
     if not cached:
         raise HTTPException(404, "Job not found")
 
-    user_id = getattr(request.state, "user", DEFAULT_USER)
+    user_id = current_user(request)
     if cached.get("user_id") != user_id:
         # Do not disclose whether another user's job exists.
         raise HTTPException(404, "Job not found")
@@ -423,7 +475,7 @@ async def status(job_id: str, request: Request):
 
 @app.get("/jobs")
 async def list_jobs(request: Request):
-    user_id = getattr(request.state, "user", DEFAULT_USER)
+    user_id = current_user(request)
     # The browser reloads this on every tab focus, and it is the only read left
     # that costs milliseconds rather than microseconds. SQLite is synchronous,
     # so off the event loop it goes.
@@ -459,7 +511,7 @@ async def list_jobs(request: Request):
 
 @app.delete("/jobs/{job_id}")
 async def delete_job(job_id: str, request: Request):
-    user_id = getattr(request.state, "user", DEFAULT_USER)
+    user_id = current_user(request)
     job_data = jobs.get(job_id)
     if not job_data:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -474,7 +526,7 @@ async def delete_job(job_id: str, request: Request):
 
 @app.get("/api/me")
 async def get_me(request: Request):
-    user_id = getattr(request.state, "user", DEFAULT_USER)
+    user_id = current_user(request)
     stats = jobs.get_user_stats(user_id)
     display_name = user_store.get_display_name(user_id) or user_id.capitalize()
     return {
@@ -487,6 +539,12 @@ async def get_me(request: Request):
     }
 
 
+# Rendering is seconds of CPU on one worker thread, and that pool is shared
+# with the job list and the retention passes. Queue renders rather than letting
+# a handful of them starve everything else.
+_render_slots = asyncio.Semaphore(2)
+
+
 @app.post("/render-docx")
 async def render_docx_endpoint(payload: dict):
     text = payload.get("text", "")
@@ -494,7 +552,8 @@ async def render_docx_endpoint(payload: dict):
         raise HTTPException(400, "text field is required and must be non-empty")
     if len(text) > MAX_RENDER_TEXT_CHARS:
         raise HTTPException(413, "text field is too large")
-    docx_bytes = await asyncio.to_thread(render_docx, text)
+    async with _render_slots:
+        docx_bytes = await asyncio.to_thread(render_docx, text)
     filename = payload.get("filename") or "protokol.docx"
     if not filename.endswith(".docx"):
         filename = f"{filename}.docx"
