@@ -59,11 +59,18 @@ DEFAULT_USER = os.environ.get("DEFAULT_USER", "admin")
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
 MAX_RENDER_TEXT_CHARS = int(os.environ.get("MAX_RENDER_TEXT_CHARS", "2000000"))
 MAX_ACTIVE_JOBS_PER_USER = int(os.environ.get("MAX_ACTIVE_JOBS_PER_USER", "3"))
+# A job holds one of the user's active slots until it reaches `done` or `error`,
+# and nothing else ever moves it off `processing`: AssemblyAI can drop a
+# transcript, and a worker can die between two writes. Three jobs stuck that way
+# leave the account unable to upload at all, so give up on one eventually.
+# Generous on purpose — transcription and drafting together take minutes.
+JOB_MAX_LIFETIME_HOURS = int(os.environ.get("JOB_MAX_LIFETIME_HOURS", "6"))
 for _name, _value in (
     ("JOB_TTL_DAYS", JOB_TTL_DAYS),
     ("MAX_UPLOAD_BYTES", MAX_UPLOAD_BYTES),
     ("MAX_RENDER_TEXT_CHARS", MAX_RENDER_TEXT_CHARS),
     ("MAX_ACTIVE_JOBS_PER_USER", MAX_ACTIVE_JOBS_PER_USER),
+    ("JOB_MAX_LIFETIME_HOURS", JOB_MAX_LIFETIME_HOURS),
 ):
     if _value <= 0:
         raise ValueError(f"{_name} must be greater than zero")

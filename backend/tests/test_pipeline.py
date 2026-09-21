@@ -5,11 +5,13 @@ The pipeline runs long after the request that started it has returned, so the
 job it is working on can change underneath it. These cover what happens then.
 """
 import asyncio
+import time
 
 import pytest
 
 import backend.services.pipeline as pipeline
-from backend.db import jobs
+from backend.config import JOB_MAX_LIFETIME_HOURS
+from backend.db import get_lock, jobs
 from backend.services.llm import Draft
 
 
@@ -206,3 +208,110 @@ def test_recover_resumes_a_job_that_reached_transcription(monkeypatch):
 
     assert "recover:job-mid-transcription" in resumed
     assert jobs.get("job-mid-transcription")["status"] == "processing"
+
+
+# --- The stall watchdog ---------------------------------------------------
+#
+# Nothing else moves a job off `processing` once the step that owned it is
+# gone, and every such job holds one of the account's three active slots.
+
+def _stale_timestamp() -> int:
+    return int(time.time()) - (JOB_MAX_LIFETIME_HOURS * 3600) - 60
+
+
+def test_a_stalled_job_is_failed_so_its_slot_comes_back():
+    job_id = "job-stalled-in-transcription"
+    jobs[job_id] = {
+        "status": "processing",
+        "phase": "transcribing",
+        "user_id": "test",
+        "aai_transcript_id": "aai-vanished",
+        "created_at": _stale_timestamp(),
+    }
+
+    assert pipeline.fail_stalled_jobs() >= 1
+
+    failed = jobs.get(job_id)
+    assert failed["status"] == "error"
+    assert failed["phase"] == "error"
+    assert "загрузите запись повторно" in failed["error"]
+    # No longer 'processing', so it no longer occupies one of the user's slots.
+    assert job_id not in {job["id"] for job in jobs.get_pending_jobs()}
+
+
+def test_a_job_still_within_the_limit_is_left_alone():
+    job_id = "job-still-working"
+    jobs[job_id] = {
+        "status": "processing",
+        "phase": "drafting",
+        "user_id": "test",
+        "created_at": int(time.time()) - 60,
+    }
+
+    pipeline.fail_stalled_jobs()
+
+    assert jobs.get(job_id)["status"] == "processing"
+    jobs.delete(job_id)
+
+
+def test_a_job_a_worker_still_holds_is_not_failed():
+    """A held lock proves someone is on it; failing it would race their write."""
+    job_id = "job-held-by-a-worker"
+    jobs[job_id] = {
+        "status": "processing",
+        "phase": "drafting",
+        "user_id": "test",
+        "created_at": _stale_timestamp(),
+    }
+
+    async def with_the_lock_held():
+        async with get_lock(job_id):
+            return pipeline.fail_stalled_jobs()
+
+    asyncio.run(with_the_lock_held())
+
+    assert jobs.get(job_id)["status"] == "processing"
+    jobs.delete(job_id)
+
+
+def test_the_polling_status_write_does_not_keep_a_job_looking_fresh():
+    """Age is counted from the upload, not from `updated_at`.
+
+    The polling loop writes the recognition service's status back on every
+    pass, so a job wedged on that service's side is touched every minute."""
+    job_id = "job-touched-but-stalled"
+    jobs[job_id] = {
+        "status": "processing",
+        "phase": "transcribing",
+        "user_id": "test",
+        "created_at": _stale_timestamp(),
+    }
+    # Exactly what poll_one does each cycle: rewrite the row, bumping updated_at.
+    touched = jobs.get(job_id)
+    touched["aai_status"] = "processing"
+    assert jobs.update_if_exists(job_id, touched)
+
+    pipeline.fail_stalled_jobs()
+
+    assert jobs.get(job_id)["status"] == "error"
+
+
+def test_recover_gives_up_on_a_job_older_than_the_limit(monkeypatch):
+    resumed = []
+    monkeypatch.setattr(
+        pipeline, "spawn", lambda coro, name: (coro.close(), resumed.append(name))
+    )
+
+    job_id = "job-stale-across-a-restart"
+    jobs[job_id] = {
+        "status": "processing",
+        "phase": "transcribing",
+        "user_id": "test",
+        "aai_transcript_id": "aai-stale",
+        "created_at": _stale_timestamp(),
+    }
+
+    asyncio.run(pipeline.recover_pending_jobs())
+
+    assert f"recover:{job_id}" not in resumed
+    assert jobs.get(job_id)["status"] == "error"

@@ -113,12 +113,20 @@ async def aai_polling_loop():
     If webhooks are configured, it runs less frequently as a fallback.
     If webhooks are NOT configured, it polls every 15 seconds.
     """
-    from backend.services.pipeline import process_transcript
+    from backend.services.pipeline import fail_stalled_jobs, process_transcript
 
     sleep_interval = 60 if (BASE_URL and WEBHOOK_SECRET) else 15
     while True:
         try:
             await asyncio.sleep(sleep_interval)
+
+            # Before polling, retire anything that has outlived any plausible
+            # hearing. This loop is the only thing that runs often enough to
+            # free a wedged job's active slot while its owner is still waiting.
+            stalled = await asyncio.to_thread(fail_stalled_jobs)
+            if stalled:
+                log.warning("Marked %s stalled job(s) as failed", stalled)
+
             pending = jobs.get_pending_jobs()
             if not pending:
                 continue
@@ -144,6 +152,22 @@ async def aai_polling_loop():
                             headers={"authorization": ASSEMBLYAI_KEY},
                         )
                     if tx_resp.status_code == 404:
+                        # The transcript is gone from AssemblyAI — past its
+                        # retention window, or removed. Polling can only repeat
+                        # this 404, so stop instead of holding the slot until
+                        # the stall watchdog notices hours later.
+                        gone = jobs.get(job_id)
+                        if gone and gone.get("status") not in ("done", "error"):
+                            gone.update({
+                                "status": "error",
+                                "phase": "error",
+                                "error": (
+                                    "Расшифровка больше недоступна на сервисе распознавания. "
+                                    "Пожалуйста, загрузите запись повторно."
+                                ),
+                            })
+                            jobs.update_if_exists(job_id, gone)
+                            log.warning(f"[{job_id}] AssemblyAI no longer has transcript {aai_id}")
                         return
                     tx_resp.raise_for_status()
                     aai_body = tx_resp.json()

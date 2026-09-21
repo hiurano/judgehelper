@@ -17,6 +17,13 @@ from backend.services.http_client import async_retry
 
 MAX_CONTINUATIONS = 5
 
+# Only the provider can tell us an answer was cut off. Guessing from the reply's
+# length instead asks a model that already finished to "continue", and it obliges
+# by restating the protocol: the draft comes back doubled and flagged incomplete.
+# A protocol drafted from a 12000-character chunk routinely passes any such
+# threshold on its own, so there is no length that is safe to guess from.
+TRUNCATED_FINISH_REASONS = {"length", "max_tokens", "model_length"}
+
 
 class Draft(NamedTuple):
     """A model's answer. `truncated` means it never reached a natural end."""
@@ -134,7 +141,7 @@ async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log
                 total_usage["completion_tokens"] += usage.get("completion_tokens", 0)
 
                 finish_reason = choices[0].get("finish_reason")
-                if finish_reason == "length" or len(draft) > 15000:
+                if finish_reason in TRUNCATED_FINISH_REASONS:
                     log.info(f"[{log_prefix}] Model hit token limit (length={len(draft)}, reason={finish_reason}). Continuing...")
                     messages.append({"role": "assistant", "content": draft})
                     messages.append({"role": "user", "content": "Твой предыдущий ответ оборвался из-за лимита токенов. Пожалуйста, продолжи строго с того места, где ты прервался, не повторяя уже написанное и ничего не пропуская."})
