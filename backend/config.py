@@ -61,9 +61,36 @@ DEFAULT_USER = os.environ.get("DEFAULT_USER", "admin")
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
 # Rendering is a paragraph at a time in pure Python: measured at ~2.6 s for
 # 500k characters and ~9.6 s for two million. A hearing's protocol runs to tens
-# of thousands, so the old two-million cap only bounded how long one request
-# could hold a worker thread.
-MAX_RENDER_TEXT_CHARS = int(os.environ.get("MAX_RENDER_TEXT_CHARS", "500000"))
+# of thousands, so a larger figure does not buy a longer protocol — it only
+# lengthens how long one request can hold a worker thread.
+#
+# This is a ceiling rather than a default because deployments already carry
+# the old two-million figure in their env file, written there by an earlier
+# version of .env.example. Refusing to start on it, the way this module treats
+# a bad SECRET_KEY, would take a running site down on its next deploy; ignoring
+# it would leave the limit that was raised in review still in force. So the
+# configured value is honoured up to what the renderer can sustain, and the
+# difference is logged rather than applied quietly.
+MAX_RENDER_TEXT_CHARS_CEILING = 500_000
+
+
+def resolve_render_limit(configured: int, ceiling: int = MAX_RENDER_TEXT_CHARS_CEILING) -> int:
+    """Honour the configured limit, up to what the renderer can sustain."""
+    if configured > ceiling:
+        log.warning(
+            "MAX_RENDER_TEXT_CHARS is set to %s; using %s, the most the document "
+            "renderer can produce without holding a worker thread for seconds. "
+            "Lower it in the env file to silence this.",
+            configured, ceiling,
+        )
+        return ceiling
+    return configured
+
+
+_configured_render_chars = int(
+    os.environ.get("MAX_RENDER_TEXT_CHARS", str(MAX_RENDER_TEXT_CHARS_CEILING))
+)
+MAX_RENDER_TEXT_CHARS = resolve_render_limit(_configured_render_chars)
 MAX_ACTIVE_JOBS_PER_USER = int(os.environ.get("MAX_ACTIVE_JOBS_PER_USER", "3"))
 # A job holds one of the user's active slots until it reaches `done` or `error`,
 # and nothing else ever moves it off `processing`: AssemblyAI can drop a
@@ -74,7 +101,7 @@ JOB_MAX_LIFETIME_HOURS = int(os.environ.get("JOB_MAX_LIFETIME_HOURS", "6"))
 for _name, _value in (
     ("JOB_TTL_DAYS", JOB_TTL_DAYS),
     ("MAX_UPLOAD_BYTES", MAX_UPLOAD_BYTES),
-    ("MAX_RENDER_TEXT_CHARS", MAX_RENDER_TEXT_CHARS),
+    ("MAX_RENDER_TEXT_CHARS", _configured_render_chars),
     ("MAX_ACTIVE_JOBS_PER_USER", MAX_ACTIVE_JOBS_PER_USER),
     ("JOB_MAX_LIFETIME_HOURS", JOB_MAX_LIFETIME_HOURS),
 ):

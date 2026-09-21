@@ -72,6 +72,26 @@ def test_upload_endpoint_file_validation(auth_client):
     assert "Содержимое файла" in resp_disguised.json()["detail"]
 
 
+@pytest.mark.parametrize(
+    "configured, expected",
+    [
+        (2_000_000, 500_000),  # what deployments still carry from an older template
+        (500_000, 500_000),    # exactly at the ceiling
+        (120_000, 120_000),    # a deliberate lower setting is left alone
+    ],
+)
+def test_the_render_limit_never_exceeds_what_the_renderer_sustains(configured, expected):
+    """Two million characters is ~9.6 s of CPU on one worker thread.
+
+    The env file is the operator's, but this bound protects the service, so a
+    value above it is capped and logged rather than obeyed or rejected. A
+    running site must not be taken down over a figure its env file inherited
+    from an earlier version of the template."""
+    from backend.config import resolve_render_limit
+
+    assert resolve_render_limit(configured) == expected
+
+
 def test_a_handler_refuses_rather_than_assuming_an_account():
     """Authorization must never fall back to a default user.
 
