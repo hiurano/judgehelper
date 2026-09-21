@@ -2,9 +2,27 @@
 # CADDY_DOMAIN comes from the environment (see docker-compose.yml).
 
 {$CADDY_DOMAIN} {
+	# The app loads nothing from anywhere else: no CDN fonts, no inline
+	# <script>, no on*= handlers. Inline styles are still needed for the
+	# style= attributes in index.html and the <style> block in login.html.
+	# FastAPI's /api/docs is exempt because Swagger UI comes from a CDN.
+	@app not path /api/docs*
+	header @app Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		# The dictaphone needs the microphone and keeps the screen awake.
+		Permissions-Policy "microphone=(self), screen-wake-lock=(self), camera=(), geolocation=(), payment=(), usb=()"
+		-Server
+	}
+
 	reverse_proxy judge-helper:8000
 }
 
 www.{$CADDY_DOMAIN} {
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	redir https://{$CADDY_DOMAIN}{uri} permanent
 }

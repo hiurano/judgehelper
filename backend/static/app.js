@@ -211,6 +211,7 @@ function pollQueueItem(item) {
                 item.total_chunks = data.total_chunks;
                 item.current_chunk = data.current_chunk;
                 item.model = data.model;
+                item.truncated = data.truncated;
                 item.timestamp = new Date().toISOString();
                 renderQueue();
                 checkQueueScheduler();
@@ -529,6 +530,15 @@ function renderQueueItem(item) {
         wrap.appendChild(err);
     }
 
+    if (isDone && item.truncated) {
+        // The model ran out of room. The text is real but may stop mid-hearing.
+        const warn = document.createElement('div');
+        warn.className = 'queue-error-msg';
+        warn.textContent = 'Модель достигла предела длины ответа — проверьте, ' +
+            'что протокол доведён до конца заседания.';
+        wrap.appendChild(warn);
+    }
+
     // Actions for auth expired or retry
     if (item.status === 'auth_required' || item.status === 'error') {
         const actions = document.createElement('div');
@@ -841,7 +851,8 @@ function renderHistory() {
             ? new Date(job.updated_at * 1000).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
             : '';
         const durStr = job.duration_min ? `${job.duration_min} мин` : '';
-        metaEl.textContent = [durStr, dateStr].filter(Boolean).join(' · ');
+        const warnStr = job.truncated ? 'возможно неполный' : '';
+        metaEl.textContent = [durStr, dateStr, warnStr].filter(Boolean).join(' · ');
 
         contentEl.appendChild(titleEl);
         contentEl.appendChild(metaEl);

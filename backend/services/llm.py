@@ -1,7 +1,7 @@
 """
 LLM service module for OpenRouter interaction, chunking, and fallback logic.
 """
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, NamedTuple, Optional
 
 if TYPE_CHECKING:
     import httpx
@@ -13,6 +13,17 @@ from backend.config import (
     log,
 )
 from backend.services.http_client import async_retry
+
+
+MAX_CONTINUATIONS = 5
+
+
+class Draft(NamedTuple):
+    """A model's answer. `truncated` means it never reached a natural end."""
+    text: str
+    model: str
+    usage: dict
+    truncated: bool = False
 
 
 def split_transcript_into_chunks(formatted_text: str, max_chunk_chars: int = 12000) -> list[str]:
@@ -51,11 +62,15 @@ def split_transcript_into_chunks(formatted_text: str, max_chunk_chars: int = 120
     return chunks
 
 
-async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log_prefix: str):
+async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log_prefix: str) -> Draft:
     """Try each model in LLM_FALLBACK_CHAIN until one returns a valid draft.
     Handles finish_reason='length' by prompting the model to continue.
-    Returns (draft, used_model, usage_dict). Raises if all models fail."""
+    Returns a Draft. Raises only if no model produced any text at all."""
     last_error: Optional[str] = None
+    # A model that keeps hitting the token limit still wrote a real protocol.
+    # Prefer a complete answer from a later model, but never throw the work
+    # away: hours of hearing and every token spent on it are in here.
+    best_partial: Optional[Draft] = None
     for model in LLM_FALLBACK_CHAIN:
         try:
             messages = [
@@ -69,7 +84,7 @@ async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log
             # must not overwrite what the provider actually said went wrong.
             model_error: Optional[str] = None
 
-            for loop_idx in range(5):
+            for loop_idx in range(MAX_CONTINUATIONS):
                 async def _do_llm_call(current_messages):
                     llm_resp = await client.post(
                         "https://openrouter.ai/api/v1/chat/completions",
@@ -129,17 +144,27 @@ async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log
                     break
 
             if is_completed and full_draft:
-                return full_draft, model, total_usage
-            else:
-                last_error = model_error or (
-                    f"{model}: Failed to complete draft within iteration limits."
-                )
-                continue
+                return Draft(full_draft, model, total_usage)
+
+            last_error = model_error or (
+                f"{model}: Failed to complete draft within iteration limits."
+            )
+            if full_draft and (best_partial is None or len(full_draft) > len(best_partial.text)):
+                best_partial = Draft(full_draft, model, total_usage, truncated=True)
+            continue
 
         except Exception as e:
             last_error = f"{model}: {e}"
             log.warning(f"[{log_prefix}] {last_error}; trying next model")
             continue
+
+    if best_partial is not None:
+        log.warning(
+            "[%s] No model finished cleanly; keeping the longest partial draft "
+            "from %s (%s chars). Last error: %s",
+            log_prefix, best_partial.model, len(best_partial.text), last_error,
+        )
+        return best_partial
 
     raise RuntimeError(
         f"Все LLM-модели не отвечают. Попробуйте через несколько минут. Последняя ошибка: {last_error}"

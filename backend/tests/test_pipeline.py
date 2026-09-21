@@ -10,6 +10,7 @@ import pytest
 
 import backend.services.pipeline as pipeline
 from backend.db import jobs
+from backend.services.llm import Draft
 
 
 class _FakeTranscriptResponse:
@@ -59,7 +60,7 @@ def test_process_transcript_writes_the_draft(fake_aai, monkeypatch):
     }
 
     async def _fake_llm(client, user_msg, log_prefix):
-        return "ПРОТОКОЛ судебного заседания", "test-model", {"prompt_tokens": 10}
+        return Draft("ПРОТОКОЛ судебного заседания", "test-model", {"prompt_tokens": 10})
 
     monkeypatch.setattr(pipeline, "call_llm_with_fallback", _fake_llm)
 
@@ -70,6 +71,30 @@ def test_process_transcript_writes_the_draft(fake_aai, monkeypatch):
     assert stored["draft"] == "ПРОТОКОЛ судебного заседания"
     assert stored["speakers_count"] == 2
     assert stored["user_id"] == "test"
+    assert stored["truncated"] is False
+
+
+def test_a_truncated_draft_is_saved_and_flagged(fake_aai, monkeypatch):
+    jobs["job-truncated"] = {
+        "status": "processing",
+        "phase": "transcribing",
+        "user_id": "test",
+        "aai_transcript_id": "aai-truncated",
+    }
+
+    async def _fake_llm(client, user_msg, log_prefix):
+        return Draft("Протокол обрывается на середине", "test-model", {}, truncated=True)
+
+    monkeypatch.setattr(pipeline, "call_llm_with_fallback", _fake_llm)
+
+    asyncio.run(pipeline.process_transcript("job-truncated"))
+
+    stored = jobs.get("job-truncated")
+    assert stored["status"] == "done"
+    assert stored["draft"] == "Протокол обрывается на середине"
+    # The operator has to be told, or they file an unfinished protocol.
+    assert stored["truncated"] is True
+    assert "неполным" in stored["phase_detail"]
 
 
 def test_process_transcript_does_not_resurrect_a_deleted_job(fake_aai, monkeypatch):
@@ -85,7 +110,7 @@ def test_process_transcript_does_not_resurrect_a_deleted_job(fake_aai, monkeypat
     async def _fake_llm(client, user_msg, log_prefix):
         # The owner deletes the protocol while the model is still drafting.
         assert jobs.delete(job_id) is True
-        return "Текст удалённого протокола", "test-model", {}
+        return Draft("Текст удалённого протокола", "test-model", {})
 
     monkeypatch.setattr(pipeline, "call_llm_with_fallback", _fake_llm)
 
@@ -100,7 +125,7 @@ def test_process_transcript_skips_a_job_that_is_already_gone(fake_aai, monkeypat
     async def _fake_llm(client, user_msg, log_prefix):
         nonlocal called
         called = True
-        return "draft", "test-model", {}
+        return Draft("draft", "test-model", {})
 
     monkeypatch.setattr(pipeline, "call_llm_with_fallback", _fake_llm)
 

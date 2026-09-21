@@ -11,7 +11,7 @@ import argparse
 import getpass
 import sys
 
-from backend.db import user_store
+from backend.db import jobs, user_store
 
 
 def _require_strong_password(password: str) -> None:
@@ -38,8 +38,13 @@ def main():
     chg_p.add_argument("new_password", nargs="?", help="Omit to enter it securely at the prompt")
 
     # delete-user
-    del_p = sub.add_parser("delete-user", help="Delete a user account")
+    del_p = sub.add_parser("delete-user", help="Delete a user account and its protocols")
     del_p.add_argument("username")
+    del_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm deleting the account together with its stored protocols",
+    )
 
     args = parser.parse_args()
 
@@ -76,12 +81,29 @@ def main():
             sys.exit(1)
 
     elif args.command == "delete-user":
-        ok = user_store.delete_user(args.username)
-        if ok:
-            print(f"✓ User '{args.username}' deleted.")
-        else:
+        if not user_store.exists(args.username):
             print(f"✗ User '{args.username}' not found.", file=sys.stderr)
             sys.exit(1)
+
+        # Jobs are owned by username: left behind, they would be handed to the
+        # next account registered under the same name.
+        protocols = jobs.count_for_user(args.username)
+        if protocols and not args.yes:
+            print(
+                f"✗ User '{args.username}' still has {protocols} stored job(s), "
+                "which will be deleted with the account.\n"
+                f"  Re-run with --yes to confirm: "
+                f"python -m backend.cli delete-user {args.username} --yes",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        removed = jobs.delete_for_user(args.username)
+        user_store.delete_user(args.username)
+        if removed:
+            print(f"✓ User '{args.username}' deleted along with {removed} job(s).")
+        else:
+            print(f"✓ User '{args.username}' deleted.")
 
     else:
         parser.print_help()
