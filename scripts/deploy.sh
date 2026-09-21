@@ -74,6 +74,44 @@ run_backup() {
 app_image="judge-helper:latest"
 rollback_image="judge-helper:rollback"
 
+prompt_file="$(absolute "$(read_env PROMPT_FILE prompts/system-protocol.md)")"
+
+file_digest() {
+    run_python -c \
+        "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" \
+        "$1" 2>/dev/null || echo "unreadable"
+}
+
+check_prompt_mount() {
+    # The prompt is a single-file bind mount, which follows the inode. Any
+    # edit that replaces the file rather than writing through it -- git, mv,
+    # vim's default save -- leaves the container reading the old text, and the
+    # advertised hot-reload silently stops working. Compare the two sides and
+    # re-bind if they have drifted apart.
+    if [ -z "$(docker compose ps --quiet judge-helper 2>/dev/null)" ]; then
+        return 0
+    fi
+    local on_host in_container
+    on_host="$(file_digest "$prompt_file")"
+    in_container="$(docker compose exec -T judge-helper python -c \
+        "import hashlib;print(hashlib.sha256(open('/app/prompts/system-protocol.md','rb').read()).hexdigest())" \
+        2>/dev/null | tr -d '\r')"
+    if [ -z "$in_container" ] || [ "$on_host" = "unreadable" ]; then
+        echo "Could not compare the system prompt between host and container." >&2
+        return 0
+    fi
+    if [ "$on_host" = "$in_container" ]; then
+        return 0
+    fi
+    echo "The container is serving an out-of-date system prompt (the mount lost"
+    echo "track of the file). Recreating judge-helper to pick up the current one..."
+    docker compose up -d --force-recreate --no-build judge-helper || true
+    if ! wait_for_ready; then
+        echo "The service did not come back after refreshing the prompt mount." >&2
+        return 1
+    fi
+}
+
 reload_caddy() {
     # The Caddyfile is a bind mount: compose sees no reason to recreate the
     # container when only the file's contents change, and Caddy does not watch
@@ -138,6 +176,11 @@ if wait_for_ready; then
     # The application is healthy at this point. A proxy config that failed to
     # load is worth failing the deploy over, but not worth rolling the
     # application back for: the old proxy config is still serving it.
+    if ! check_prompt_mount; then
+        docker compose ps
+        echo "Deployment failed: the system prompt mount could not be refreshed." >&2
+        exit 1
+    fi
     if ! reload_caddy; then
         docker compose ps
         echo "Deployment failed: the application is live but Caddy kept its old configuration." >&2
