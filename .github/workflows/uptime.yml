@@ -35,14 +35,21 @@ jobs:
           note() { failures="${failures}- $1"$'\n'; }
 
           for path in /health /ready; do
-            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "${SITE}${path}" || echo 000)"
+            # curl already prints %{http_code} (000 on a failed transfer), so the
+            # guard must not echo a second code of its own.
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "${SITE}${path}" || true)"
+            code="${code:-000}"
             if [ "$code" != "200" ]; then
               note "\`${path}\` returned HTTP ${code}"
             fi
           done
 
+          # These pipelines are expected to fail when the site is down, which is
+          # exactly the case this job must report on. GitHub runs steps with
+          # `bash -e`, so without `|| true` the step would abort here and never
+          # reach the reporting block below.
           location="$(curl -sSI --max-time 20 "https://www.${HOST}" 2>/dev/null \
-            | awk 'tolower($1) == "location:" { print $2 }' | tr -d '\r')"
+            | awk 'tolower($1) == "location:" { print $2 }' | tr -d '\r' || true)"
           case "$location" in
             https://${HOST}/*) ;;
             *) note "\`www\` redirected to \`${location:-nothing}\`" ;;
@@ -50,7 +57,7 @@ jobs:
 
           expiry="$(echo \
             | openssl s_client -connect "${HOST}:443" -servername "${HOST}" 2>/dev/null \
-            | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+            | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || true)"
           if [ -z "$expiry" ]; then
             note "could not read the TLS certificate"
           else
@@ -79,6 +86,7 @@ jobs:
         if: steps.probe.outputs.failing == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           DETAILS: ${{ steps.probe.outputs.details }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -101,6 +109,7 @@ jobs:
         if: steps.probe.outputs.failing == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
