@@ -69,6 +69,14 @@ def _looks_like_supported_media(header: bytes) -> bool:
 UPLOAD_DIR = BACKEND_DIR / "data" / "uploads"
 
 
+def _too_large_message() -> str:
+    """Quote the limit that is actually configured, not a hardcoded 1 GB."""
+    return (
+        "Файл слишком большой. Максимальный допустимый размер: "
+        f"{MAX_UPLOAD_BYTES // (1024 * 1024)} МБ"
+    )
+
+
 def prune_orphan_uploads() -> int:
     """Delete audio left on disk by a process that died mid-upload.
 
@@ -285,9 +293,12 @@ async def upload(
     if content_length:
         try:
             if int(content_length) > MAX_UPLOAD_BYTES + 1024 * 1024:
-                raise HTTPException(413, "Файл слишком большой")
+                raise HTTPException(413, _too_large_message())
         except ValueError:
             raise HTTPException(400, "Некорректный Content-Length")
+
+    if not ASSEMBLYAI_KEY:
+        raise HTTPException(500, "AssemblyAI key not configured on server")
 
     user_id = getattr(request.state, "user", DEFAULT_USER)
     job_id = "job-" + uuid.uuid4().hex[:24]
@@ -318,19 +329,21 @@ async def upload(
         with open(file_path, "wb") as f:
             while chunk := await file.read(1024 * 1024):  # 1 MB chunks
                 if not header:
+                    # Judge the format from the first chunk: a file that is not
+                    # audio should be refused now, not after it has all landed.
                     header = chunk[:16]
+                    if not _looks_like_supported_media(header):
+                        raise HTTPException(
+                            400,
+                            "Содержимое файла не соответствует поддерживаемому аудио/видео формату",
+                        )
                 await asyncio.to_thread(f.write, chunk)
                 size_bytes += len(chunk)
                 if size_bytes > MAX_UPLOAD_BYTES:
-                    raise HTTPException(400, "Файл слишком большой. Максимальный допустимый размер: 1 ГБ")
+                    raise HTTPException(413, _too_large_message())
 
         if size_bytes == 0:
             raise HTTPException(400, "Загруженный файл пуст")
-        if not _looks_like_supported_media(header):
-            raise HTTPException(400, "Содержимое файла не соответствует поддерживаемому аудио/видео формату")
-
-        if not ASSEMBLYAI_KEY:
-            raise HTTPException(500, "AssemblyAI key not configured on server")
     except BaseException:
         file_path.unlink(missing_ok=True)
         jobs.delete(job_id)
@@ -434,6 +447,7 @@ async def list_jobs(request: Request):
             # The draft itself is fetched from /status/{job_id} on demand: it is
             # the whole protocol, and this list is reloaded on every tab focus.
             "has_draft": bool(item.get("draft")),
+            "truncated": bool(item.get("truncated")),
             "error": item.get("error") if item.get("status") == "error" else None,
         })
     return {"jobs": cleaned}

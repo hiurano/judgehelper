@@ -118,15 +118,16 @@ async def process_transcript(job_id: str):
                 })
                 _store(job_id, existing)
 
+                truncated = False
                 if len(chunks) == 1:
                     user_msg = (
                         f"{meta_block}"
                         "Составь черновик протокола судебного заседания на основе "
                         f"следующей размеченной стенограммы аудиозаписи:\n\n{formatted}"
                     )
-                    draft, used_model, usage = await call_llm_with_fallback(
-                        client, user_msg, job_id
-                    )
+                    result = await call_llm_with_fallback(client, user_msg, job_id)
+                    draft, used_model, usage = result.text, result.model, result.usage
+                    truncated = result.truncated
                 else:
                     log.info(f"[{job_id}] Transcript split into {len(chunks)} chunks for sequential drafting.")
                     drafts = []
@@ -172,9 +173,13 @@ async def process_transcript(job_id: str):
                                 f"{chunk_text}"
                             )
 
-                        c_draft, c_model, c_usage = await call_llm_with_fallback(
+                        chunk_result = await call_llm_with_fallback(
                             client, prompt, f"{job_id}-chunk-{idx + 1}"
                         )
+                        c_draft, c_model, c_usage = (
+                            chunk_result.text, chunk_result.model, chunk_result.usage
+                        )
+                        truncated = truncated or chunk_result.truncated
 
                         # Robustly extract and remove role key lines
                         role_lines = []
@@ -223,7 +228,11 @@ async def process_transcript(job_id: str):
                     "current_chunk": total_chunks,
                     "model": used_model,
                     "phase": "done",
-                    "phase_detail": "Протокол сформирован",
+                    "truncated": truncated,
+                    "phase_detail": (
+                        "Протокол сформирован, но может быть неполным"
+                        if truncated else "Протокол сформирован"
+                    ),
                 })
                 _store(job_id, existing_done)
             except JobGone:

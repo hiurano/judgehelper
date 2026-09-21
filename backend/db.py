@@ -179,6 +179,23 @@ class JobStore:
             cur = conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
             return cur.rowcount > 0
 
+    def count_for_user(self, user_id: str) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        return int(row[0])
+
+    def delete_for_user(self, user_id: str) -> int:
+        """Remove every job belonging to a user. Used when the account goes.
+
+        Jobs are owned by username, so leaving them behind would hand them to
+        the next account created with the same name."""
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM jobs WHERE user_id = ?", (user_id,))
+            deleted = cur.rowcount
+        return deleted
+
     def cleanup_old(self, max_age_days: int) -> int:
         cutoff = int(time.time()) - max_age_days * 86400
         with self._lock, self._conn() as conn:
