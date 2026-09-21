@@ -309,7 +309,77 @@ def test_login_rate_limit():
 
 
 def test_allowed_origins_whitespace_stripping():
-    import os
+    from backend.config import parse_origins
+
     raw_origins = " https://app.example.com , http://localhost:3000 , "
-    cleaned = [o.strip() for o in raw_origins.split(",") if o.strip()]
-    assert cleaned == ["https://app.example.com", "http://localhost:3000"]
+    assert parse_origins(raw_origins) == [
+        "https://app.example.com",
+        "http://localhost:3000",
+    ]
+    assert parse_origins("") == []
+    assert parse_origins("  ,  ") == []
+
+
+def test_jobs_list_omits_the_protocol_text(auth_client):
+    from backend.db import jobs
+
+    jobs["job-listed"] = {
+        "status": "done",
+        "draft": "Полный текст протокола",
+        "filename": "zasedanie.mp3",
+        "user_id": "test",
+    }
+
+    response = auth_client.get("/jobs")
+    assert response.status_code == 200
+    listed = {job["id"]: job for job in response.json()["jobs"]}
+
+    # The list is reloaded on every tab focus; the text is fetched on demand.
+    assert "Полный текст протокола" not in response.text
+    assert "draft" not in listed["job-listed"]
+    assert listed["job-listed"]["has_draft"] is True
+
+    # ...and /status still serves it for the protocol being downloaded.
+    detail = auth_client.get("/status/job-listed")
+    assert detail.json()["draft"] == "Полный текст протокола"
+
+
+def test_api_me_reports_the_active_job_limit(auth_client):
+    import backend.main as main_mod
+
+    response = auth_client.get("/api/me")
+    assert response.status_code == 200
+    assert response.json()["max_active_jobs"] == main_mod.MAX_ACTIVE_JOBS_PER_USER
+
+
+def test_prune_orphan_uploads_spares_files_of_active_jobs(tmp_path, monkeypatch):
+    import backend.main as main_mod
+    from backend.db import jobs
+
+    monkeypatch.setattr(main_mod, "UPLOAD_DIR", tmp_path)
+
+    jobs["job-still-uploading"] = {"status": "processing", "user_id": "test"}
+    jobs["job-already-done"] = {"status": "done", "user_id": "test"}
+
+    in_use = tmp_path / "job-still-uploading.mp3"
+    finished = tmp_path / "job-already-done.mp3"
+    abandoned = tmp_path / "job-vanished.wav"
+    for path in (in_use, finished, abandoned):
+        path.write_bytes(b"audio")
+
+    removed = main_mod.prune_orphan_uploads()
+
+    assert in_use.exists()
+    assert not finished.exists()
+    assert not abandoned.exists()
+    assert removed == 2
+
+    # Clean up so later tests do not see a stray pending job.
+    jobs.delete("job-still-uploading")
+
+
+def test_prune_orphan_uploads_tolerates_a_missing_directory(tmp_path, monkeypatch):
+    import backend.main as main_mod
+
+    monkeypatch.setattr(main_mod, "UPLOAD_DIR", tmp_path / "never-created")
+    assert main_mod.prune_orphan_uploads() == 0

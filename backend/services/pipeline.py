@@ -16,12 +16,25 @@ from backend.services.text_cleaner import clean_transcript, format_metadata_bloc
 from backend.services.task_manager import spawn
 
 
+class JobGone(Exception):
+    """Raised when the job being worked on was deleted by its owner."""
+
+
+def _store(job_id: str, data: dict) -> None:
+    """Write job state back, refusing to recreate a row that was deleted."""
+    if not jobs.update_if_exists(job_id, data):
+        raise JobGone(job_id)
+
+
 async def process_transcript(job_id: str):
     """Process transcript from AssemblyAI, format text, and run LLM drafting."""
     lock = get_lock(job_id)
     try:
         async with lock:
-            existing = jobs.get(job_id, {})
+            existing = jobs.get(job_id)
+            if existing is None:
+                log.info(f"[{job_id}] Job no longer exists — nothing to process")
+                return
             if existing.get("status") == "done":
                 return
             metadata = existing.get("metadata", {})
@@ -32,15 +45,15 @@ async def process_transcript(job_id: str):
             audio_duration_sec = existing.get("audio_duration_sec")
             aai_transcript_id = existing.get("aai_transcript_id") or job_id
 
-            existing.update({
-                "status": "processing",
-                "phase": existing.get("phase", "processing"),
-                "aai_transcript_id": aai_transcript_id,
-                "audio_duration_sec": audio_duration_sec,
-            })
-            jobs[job_id] = existing
-
             try:
+                existing.update({
+                    "status": "processing",
+                    "phase": existing.get("phase", "processing"),
+                    "aai_transcript_id": aai_transcript_id,
+                    "audio_duration_sec": audio_duration_sec,
+                })
+                _store(job_id, existing)
+
                 client = get_shared_client()
 
                 async def _do_fetch_transcript():
@@ -62,7 +75,7 @@ async def process_transcript(job_id: str):
                         "phase": "transcribing",
                         "audio_duration_sec": audio_duration_sec,
                     })
-                    jobs[job_id] = existing
+                    _store(job_id, existing)
                     return
 
                 utterances = transcript.get("utterances") or []
@@ -103,7 +116,7 @@ async def process_transcript(job_id: str):
                     "drafting_started_at": drafting_started_at,
                     "phase_detail": f"Составление протокола нейросетью (часть 1 из {total_chunks})..." if total_chunks > 1 else "Составление протокола нейросетью...",
                 })
-                jobs[job_id] = existing
+                _store(job_id, existing)
 
                 if len(chunks) == 1:
                     user_msg = (
@@ -124,13 +137,15 @@ async def process_transcript(job_id: str):
                     last_context = ""
 
                     for idx, chunk_text in enumerate(chunks):
-                        existing_chunk = jobs.get(job_id, {})
+                        existing_chunk = jobs.get(job_id)
+                        if existing_chunk is None:
+                            raise JobGone(job_id)
                         existing_chunk.update({
                             "current_chunk": idx + 1,
                             "total_chunks": total_chunks,
                             "phase_detail": f"Составление протокола нейросетью (часть {idx + 1} из {total_chunks})...",
                         })
-                        jobs[job_id] = existing_chunk
+                        _store(job_id, existing_chunk)
                         if idx == 0:
                             prompt = (
                                 f"{meta_block}"
@@ -195,7 +210,9 @@ async def process_transcript(job_id: str):
                     f"chunks={len(chunks)}, in={usage.get('prompt_tokens')} out={usage.get('completion_tokens')})"
                 )
 
-                existing_done = jobs.get(job_id, {})
+                existing_done = jobs.get(job_id)
+                if existing_done is None:
+                    raise JobGone(job_id)
                 existing_done.update({
                     "status": "done",
                     "draft": draft,
@@ -208,7 +225,11 @@ async def process_transcript(job_id: str):
                     "phase": "done",
                     "phase_detail": "Протокол сформирован",
                 })
-                jobs[job_id] = existing_done
+                _store(job_id, existing_done)
+            except JobGone:
+                # The owner deleted the protocol while it was being drafted.
+                # Their decision wins: leave the row deleted and stop here.
+                log.info(f"[{job_id}] Job deleted while processing — discarding result")
             except Exception:
                 log.exception(f"Processing failed for {job_id}")
                 existing.update({
@@ -216,7 +237,7 @@ async def process_transcript(job_id: str):
                     "error": "Не удалось завершить обработку. Повторите попытку или обратитесь к администратору.",
                     "phase": "error",
                 })
-                jobs[job_id] = existing
+                jobs.update_if_exists(job_id, existing)
     finally:
         remove_lock(job_id)
 
@@ -235,13 +256,17 @@ async def recover_pending_jobs():
             phase = item.get("phase")
             aai_transcript_id = item.get("aai_transcript_id")
 
-            if phase == "uploading_to_aai" and not aai_transcript_id:
+            # Without a transcript id there is nothing to resume: the job died
+            # somewhere between receiving the upload and handing it to
+            # AssemblyAI, and the audio it was holding is gone with it.
+            if not aai_transcript_id:
                 item.update({
                     "status": "error",
+                    "phase": "error",
                     "error": "Обработка прервана перезапуском сервера. Пожалуйста, загрузите файл повторно.",
                 })
-                jobs[job_id] = item
-                log.warning(f"[{job_id}] Interrupted during initial upload — marked as error")
+                jobs.update_if_exists(job_id, item)
+                log.warning(f"[{job_id}] Interrupted before transcription started (phase={phase}) — marked as error")
             else:
                 log.info(f"[{job_id}] Resuming background processing (phase={phase}, aai_transcript_id={aai_transcript_id})")
                 spawn(process_transcript(job_id), name=f"recover:{job_id}")

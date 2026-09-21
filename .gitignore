@@ -9,6 +9,10 @@ __pycache__/
 # Environment and secrets
 .env
 .env.local
+# scripts/set_config.py drops timestamped .env.<stamp>.bak copies beside the
+# env file, and they hold live secrets. DEPLOY.md says `git add .`.
+.env.*
+!.env.example
 
 # Runtime data and logs
 backend/data/
