@@ -426,6 +426,39 @@ function getJobSteps(item) {
     return [s1, s2, s3, s4];
 }
 
+// A job the server still counts as active holds one of the account's slots.
+// Dropping the card alone would leave it counted, so tell the server too.
+async function cancelQueueItem(item) {
+    if (!confirm(`Прервать обработку «${item.filename}»?\nЗагруженная запись будет удалена.`)) return;
+
+    if (item.pollTimer) clearInterval(item.pollTimer);
+    item.pollTimer = null;
+
+    if (item.jobId) {
+        try {
+            const resp = await fetch(`${BACKEND}/jobs/${item.jobId}`, { method: 'DELETE' });
+            // 404 means it is already gone, which is the outcome we wanted.
+            if (!resp.ok && resp.status !== 404) {
+                alert('Не удалось прервать задачу на сервере. Попробуйте ещё раз.');
+                pollQueueItem(item);
+                return;
+            }
+        } catch (err) {
+            alert('Нет связи с сервером. Попробуйте ещё раз, когда интернет восстановится.');
+            pollQueueItem(item);
+            return;
+        }
+    }
+
+    queue = queue.filter((q) => q.key !== item.key);
+    if (queue.length === 0) showCard('upload-card');
+    else renderQueue();
+    checkQueueScheduler();
+    releaseWakeLockIfDone();
+    loadHistoryJobs();
+}
+
+
 function renderQueueItem(item) {
     const isDone = item.status === 'done';
     const isErr = item.status === 'error' || item.status === 'auth_required';
@@ -480,6 +513,15 @@ function renderQueueItem(item) {
         sw.className = 'stopwatch-badge';
         sw.textContent = formatHMS(elapsed);
         head.appendChild(sw);
+
+        // Without this the only way out of a wedged job is to wait for the
+        // server's stall timeout, with one of three slots held the whole time.
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'queue-remove-btn';
+        cancelBtn.title = 'Прервать обработку';
+        cancelBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+        cancelBtn.addEventListener('click', () => { cancelQueueItem(item); });
+        head.appendChild(cancelBtn);
     } else if (isStaged || isErr) {
         // Remove Button
         const rmBtn = document.createElement('button');
@@ -487,6 +529,11 @@ function renderQueueItem(item) {
         rmBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
         rmBtn.title = 'Удалить';
         rmBtn.addEventListener('click', () => {
+            // A failed job still has a row on the server; drop that too so the
+            // card does not come back on the next reload.
+            if (item.jobId) {
+                fetch(`${BACKEND}/jobs/${item.jobId}`, { method: 'DELETE' }).catch(() => {});
+            }
             queue = queue.filter((q) => q.key !== item.key);
             if (queue.length === 0) showCard('upload-card');
             else renderQueue();

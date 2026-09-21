@@ -95,6 +95,45 @@ def test_continues_a_reply_cut_off_by_the_token_limit(two_model_chain):
     assert client.requests[1]["messages"][-2]["content"] == "Первая половина. "
 
 
+def test_a_long_but_finished_reply_is_not_continued(two_model_chain):
+    """A real protocol runs to tens of thousands of characters.
+
+    Asking a model that already said "stop" to continue makes it restate the
+    whole protocol, so the draft came back duplicated once per continuation and
+    flagged as possibly incomplete."""
+    client = _FakeClient([_completion("А" * 16000)])
+
+    result = asyncio.run(llm.call_llm_with_fallback(client, "стенограмма", "job-8"))
+
+    assert len(client.requests) == 1
+    assert result.text == "А" * 16000
+    assert result.truncated is False
+
+
+def test_a_provider_specific_truncation_reason_is_honoured(two_model_chain):
+    """Not every provider calls a token-limit stop "length"."""
+    client = _FakeClient([
+        _completion("Первая половина. ", finish_reason="max_tokens"),
+        _completion("Вторая половина."),
+    ])
+
+    result = asyncio.run(llm.call_llm_with_fallback(client, "стенограмма", "job-9"))
+
+    assert result.text == "Первая половина. Вторая половина."
+    assert result.truncated is False
+
+
+def test_an_unknown_finish_reason_counts_as_finished(two_model_chain):
+    """Without a reason to think otherwise, stop: continuing duplicates work."""
+    client = _FakeClient([_completion("ПРОТОКОЛ", finish_reason=None)])
+
+    result = asyncio.run(llm.call_llm_with_fallback(client, "стенограмма", "job-10"))
+
+    assert len(client.requests) == 1
+    assert result.text == "ПРОТОКОЛ"
+    assert result.truncated is False
+
+
 def test_keeps_the_longest_partial_when_no_model_finishes(two_model_chain):
     """A protocol cut off by the token limit still beats losing everything."""
     short = [_completion(f"A{i}", finish_reason="length")

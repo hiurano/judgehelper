@@ -7,6 +7,7 @@ import time
 from backend.config import (
     ASSEMBLYAI_KEY,
     DEFAULT_USER,
+    JOB_MAX_LIFETIME_HOURS,
     log,
 )
 from backend.db import get_lock, jobs, remove_lock
@@ -18,6 +19,64 @@ from backend.services.task_manager import spawn
 
 class JobGone(Exception):
     """Raised when the job being worked on was deleted by its owner."""
+
+
+STALLED_MESSAGE = (
+    "Обработка длится слишком долго и была прервана. "
+    "Пожалуйста, загрузите запись повторно."
+)
+
+
+def job_age_seconds(item: dict, now: int) -> int:
+    """How long this job has been alive, counted from the upload.
+
+    Deliberately not `updated_at`: the polling loop writes the transcription
+    service's status back on every pass, so a job wedged on that service's side
+    looks freshly touched for ever."""
+    started = item.get("created_at") or item.get("aai_started_at") or now
+    try:
+        return max(0, now - int(started))
+    except (TypeError, ValueError):
+        return 0
+
+
+def fail_stalled_jobs() -> int:
+    """Give up on jobs that have been processing for longer than any hearing.
+
+    Nothing else moves a job off `processing` when the step that owned it
+    disappears — a transcript dropped by the recognition service, a worker
+    killed between two writes. Each one holds an active slot for the full
+    retention window, and three of them stop the account uploading at all.
+
+    A job whose lock is held is skipped: someone is demonstrably still working
+    on it, and marking it failed would race that worker's own result."""
+    now = int(time.time())
+    cutoff = JOB_MAX_LIFETIME_HOURS * 3600
+    failed = 0
+    for item in jobs.get_pending_jobs():
+        job_id = item.get("id")
+        if not job_id:
+            continue
+        age = job_age_seconds(item, now)
+        if age < cutoff:
+            continue
+        if get_lock(job_id).locked():
+            continue
+        # Read before the update: the phase it died in is the whole diagnosis.
+        stalled_phase = item.get("phase")
+        item.update({
+            "status": "error",
+            "phase": "error",
+            "error": STALLED_MESSAGE,
+        })
+        if jobs.update_if_exists(job_id, item):
+            failed += 1
+            log.warning(
+                "[%s] Stalled in phase=%s for %.1f h — marked as error",
+                job_id, stalled_phase, age / 3600,
+            )
+        remove_lock(job_id)
+    return failed
 
 
 def _store(job_id: str, data: dict) -> None:
@@ -258,12 +317,27 @@ async def recover_pending_jobs():
         if not pending:
             return
         log.info(f"Startup: found {len(pending)} pending jobs to recover")
+        now = int(time.time())
+        cutoff = JOB_MAX_LIFETIME_HOURS * 3600
         for item in pending:
             job_id = item.get("id")
             if not job_id:
                 continue
             phase = item.get("phase")
             aai_transcript_id = item.get("aai_transcript_id")
+
+            # Resuming a job from last week only re-runs work whose result
+            # nobody is waiting for, and it can no longer succeed anyway once
+            # the recognition service has dropped the transcript.
+            if job_age_seconds(item, now) >= cutoff:
+                item.update({
+                    "status": "error",
+                    "phase": "error",
+                    "error": STALLED_MESSAGE,
+                })
+                jobs.update_if_exists(job_id, item)
+                log.warning(f"[{job_id}] Too old to resume (phase={phase}) — marked as error")
+                continue
 
             # Without a transcript id there is nothing to resume: the job died
             # somewhere between receiving the upload and handing it to
