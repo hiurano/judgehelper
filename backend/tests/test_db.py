@@ -100,6 +100,56 @@ def test_stats_survive_the_duration_column_migration(tmp_path):
     assert store.get("job-a")["duration_min"] == 10.5
 
 
+def test_the_protocol_text_moves_out_of_the_blob_on_migration(tmp_path):
+    """Older rows keep the text inside `data`; it belongs in its own column.
+
+    Nothing may be lost in the move, and the job list must keep reporting
+    which rows have a protocol without reading one."""
+    db_file = tmp_path / "legacy-draft.db"
+    conn = sqlite3.connect(str(db_file))
+    conn.execute(
+        """CREATE TABLE jobs (id TEXT PRIMARY KEY, data TEXT NOT NULL,
+           updated_at INTEGER NOT NULL, user_id TEXT DEFAULT 'test')"""
+    )
+    conn.execute("ALTER TABLE jobs ADD COLUMN status TEXT")
+    conn.execute("ALTER TABLE jobs ADD COLUMN aai_transcript_id TEXT")
+    finished = {"status": "done", "user_id": "test", "filename": "z.mp3",
+                "draft": "ПРОТОКОЛ\nсудебного заседания"}
+    unfinished = {"status": "processing", "user_id": "test", "phase": "drafting"}
+    for job_id, data in (("job-old", finished), ("job-busy", unfinished)):
+        conn.execute(
+            "INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?)",
+            (job_id, json.dumps(data, ensure_ascii=False), int(time.time()),
+             "test", data["status"], None),
+        )
+    conn.commit()
+    conn.close()
+
+    store = JobStore(str(db_file))
+
+    # Readers still see the text exactly where it always was.
+    assert store.get("job-old")["draft"] == "ПРОТОКОЛ\nсудебного заседания"
+    assert store.get("job-old")["filename"] == "z.mp3"
+    assert "draft" not in store.get("job-busy")
+
+    # ...but it is no longer inside the blob the list reads.
+    with sqlite3.connect(str(db_file)) as raw:
+        blob, column = raw.execute(
+            "SELECT data, draft FROM jobs WHERE id = 'job-old'"
+        ).fetchone()
+    assert "ПРОТОКОЛ" not in blob
+    assert column == "ПРОТОКОЛ\nсудебного заседания"
+
+    listed = {row["id"]: row for row in store.list_recent("test", 30)}
+    assert listed["job-old"]["has_draft"] is True
+    assert listed["job-busy"]["has_draft"] is False
+    assert "draft" not in listed["job-old"]
+
+    # A round trip through the store keeps the text.
+    store["job-old"] = store.get("job-old")
+    assert store.get("job-old")["draft"] == "ПРОТОКОЛ\nсудебного заседания"
+
+
 def test_job_store_cleanup_old(temp_job_store):
     store = temp_job_store
     store["old_job"] = {"status": "done"}
