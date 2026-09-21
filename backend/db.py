@@ -45,6 +45,21 @@ def verify_password(password: str, stored_hash: str) -> bool:
         return False
 
 
+def _split_draft(data: dict) -> tuple[dict, Optional[str]]:
+    """Separate the protocol text from the rest of a job's state.
+
+    The text is by far the largest thing a job carries — tens of kilobytes —
+    and almost nothing that reads a job wants it. Keeping it out of the JSON
+    blob means the job list no longer parses megabytes to show thirty rows,
+    and each progress write during drafting no longer rewrites the whole
+    protocol. Returns a copy: callers keep using their own dict afterwards."""
+    if "draft" not in data:
+        return data, None
+    rest = {key: value for key, value in data.items() if key != "draft"}
+    draft = data.get("draft")
+    return rest, draft if isinstance(draft, str) else None
+
+
 def duration_seconds(data: dict) -> Optional[float]:
     """Audio length in seconds, from whichever field the pipeline recorded.
 
@@ -93,6 +108,23 @@ class JobStore:
                 conn.execute("ALTER TABLE jobs ADD COLUMN status TEXT")
             if "aai_transcript_id" not in cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN aai_transcript_id TEXT")
+            if "draft" not in cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN draft TEXT")
+                # Lift the text out of the blobs written by earlier versions.
+                for job_id, data_str in conn.execute(
+                    "SELECT id, data FROM jobs WHERE data LIKE '%\"draft\"%'"
+                ).fetchall():
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    rest, draft = _split_draft(data)
+                    if draft is None and "draft" not in data:
+                        continue
+                    conn.execute(
+                        "UPDATE jobs SET data = ?, draft = ? WHERE id = ?",
+                        (json.dumps(rest, ensure_ascii=False, default=str), draft, job_id),
+                    )
             if "duration_sec" not in cols:
                 # Kept beside the blob so the per-user totals never have to read
                 # it. Backfilled once here; the rows are rewritten from then on.
@@ -133,15 +165,23 @@ class JobStore:
         finally:
             conn.close()
 
+    @staticmethod
+    def _rejoin(data_str: str, draft: Optional[str]) -> dict:
+        """Put the protocol text back where every caller expects it."""
+        data = json.loads(data_str)
+        if draft is not None:
+            data["draft"] = draft
+        return data
+
     def get(self, job_id: str, default=None):
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT data FROM jobs WHERE id = ?", (job_id,)
+                "SELECT data, draft FROM jobs WHERE id = ?", (job_id,)
             ).fetchone()
         if row is None:
             return default
         try:
-            return json.loads(row[0])
+            return self._rejoin(row[0], row[1])
         except json.JSONDecodeError:
             log.exception(f"Corrupt JSON for job {job_id} — treating as missing")
             return default
@@ -158,7 +198,8 @@ class JobStore:
         This creates the row if it is missing, so it is for code that owns the
         job's existence. Anything writing back state it read earlier wants
         `update_if_exists` instead."""
-        payload = json.dumps(data, ensure_ascii=False, default=str)
+        rest, draft = _split_draft(data)
+        payload = json.dumps(rest, ensure_ascii=False, default=str)
         ts = int(time.time())
         user_id = data.get("user_id", DEFAULT_USER)
         status = data.get("status")
@@ -168,16 +209,18 @@ class JobStore:
         with self._lock, self._conn() as conn:
             conn.execute(
                 """INSERT INTO jobs
-                   (id, data, updated_at, user_id, status, aai_transcript_id, duration_sec)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   (id, data, updated_at, user_id, status, aai_transcript_id,
+                    duration_sec, draft)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(id) DO UPDATE SET
                        data = excluded.data,
                        updated_at = excluded.updated_at,
                        user_id = COALESCE(excluded.user_id, jobs.user_id),
                        status = excluded.status,
                        aai_transcript_id = excluded.aai_transcript_id,
-                       duration_sec = excluded.duration_sec""",
-                (job_id, payload, ts, user_id, status, aai_transcript_id, duration),
+                       duration_sec = excluded.duration_sec,
+                       draft = excluded.draft""",
+                (job_id, payload, ts, user_id, status, aai_transcript_id, duration, draft),
             )
 
     def update_if_exists(self, job_id: str, data: dict) -> bool:
@@ -188,7 +231,8 @@ class JobStore:
         memory. `__setitem__` would insert that copy straight back, reviving a
         deleted protocol under the default account; this refuses instead and
         lets the caller stop."""
-        payload = json.dumps(data, ensure_ascii=False, default=str)
+        rest, draft = _split_draft(data)
+        payload = json.dumps(rest, ensure_ascii=False, default=str)
         ts = int(time.time())
         user_id = data.get("user_id")
         status = data.get("status")
@@ -203,9 +247,10 @@ class JobStore:
                        user_id = COALESCE(?, user_id),
                        status = ?,
                        aai_transcript_id = ?,
-                       duration_sec = ?
+                       duration_sec = ?,
+                       draft = ?
                    WHERE id = ?""",
-                (payload, ts, user_id, status, aai_transcript_id, duration, job_id),
+                (payload, ts, user_id, status, aai_transcript_id, duration, draft, job_id),
             )
             updated = cur.rowcount > 0
         return updated
@@ -255,18 +300,23 @@ class JobStore:
         Returns (job_id, job_data) or (None, None)."""
         with self._conn() as conn:
             # Check aai_transcript_id column first (fast indexed lookup)
-            row = conn.execute("SELECT id, data FROM jobs WHERE aai_transcript_id = ?", (key_or_aai_id,)).fetchone()
+            row = conn.execute(
+                "SELECT id, data, draft FROM jobs WHERE aai_transcript_id = ?",
+                (key_or_aai_id,),
+            ).fetchone()
             if row:
                 try:
-                    return row[0], json.loads(row[1])
+                    return row[0], self._rejoin(row[1], row[2])
                 except Exception:
                     pass
 
             # Fallback to checking primary id
-            row = conn.execute("SELECT data FROM jobs WHERE id = ?", (key_or_aai_id,)).fetchone()
+            row = conn.execute(
+                "SELECT data, draft FROM jobs WHERE id = ?", (key_or_aai_id,)
+            ).fetchone()
             if row:
                 try:
-                    return key_or_aai_id, json.loads(row[0])
+                    return key_or_aai_id, self._rejoin(row[0], row[1])
                 except Exception:
                     pass
         return None, None
@@ -289,23 +339,32 @@ class JobStore:
         return results
 
     def list_recent(self, user_id: str = None, limit: int = 30) -> list:
-        with self._lock, self._conn() as conn:
+        """Rows for the job list, deliberately without the protocol text.
+
+        Selecting the text here meant parsing megabytes on every tab focus for
+        a list that shows none of it, so `has_draft` is read from the column
+        instead and the text is fetched per job from /status when wanted."""
+        with self._conn() as conn:
             if user_id:
                 rows = conn.execute(
-                    "SELECT id, data, updated_at FROM jobs WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?",
+                    """SELECT id, data, updated_at, draft IS NOT NULL
+                       FROM jobs WHERE user_id = ?
+                       ORDER BY updated_at DESC LIMIT ?""",
                     (user_id, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT id, data, updated_at FROM jobs ORDER BY updated_at DESC LIMIT ?",
+                    """SELECT id, data, updated_at, draft IS NOT NULL
+                       FROM jobs ORDER BY updated_at DESC LIMIT ?""",
                     (limit,),
                 ).fetchall()
         results = []
-        for job_id, data_str, updated_at in rows:
+        for job_id, data_str, updated_at, has_draft in rows:
             try:
                 data = json.loads(data_str)
                 data["id"] = job_id
                 data["updated_at"] = updated_at
+                data["has_draft"] = bool(has_draft)
                 results.append(data)
             except Exception:
                 continue
@@ -341,7 +400,8 @@ class JobStore:
         self, job_id: str, data: dict, max_active: int
     ) -> bool:
         """Atomically reserve a processing slot for a user in this process."""
-        payload = json.dumps(data, ensure_ascii=False, default=str)
+        rest, draft = _split_draft(data)
+        payload = json.dumps(rest, ensure_ascii=False, default=str)
         ts = int(time.time())
         user_id = data.get("user_id", DEFAULT_USER)
         with self._lock, self._conn() as conn:
@@ -353,9 +413,11 @@ class JobStore:
                 return False
             conn.execute(
                 """INSERT INTO jobs
-                   (id, data, updated_at, user_id, status, aai_transcript_id, duration_sec)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (job_id, payload, ts, user_id, data.get("status"), None, duration_seconds(data)),
+                   (id, data, updated_at, user_id, status, aai_transcript_id,
+                    duration_sec, draft)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (job_id, payload, ts, user_id, data.get("status"), None,
+                 duration_seconds(data), draft),
             )
         return True
 

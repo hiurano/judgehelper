@@ -424,7 +424,10 @@ async def status(job_id: str, request: Request):
 @app.get("/jobs")
 async def list_jobs(request: Request):
     user_id = getattr(request.state, "user", DEFAULT_USER)
-    recent = jobs.list_recent(user_id=user_id, limit=30)
+    # The browser reloads this on every tab focus, and it is the only read left
+    # that costs milliseconds rather than microseconds. SQLite is synchronous,
+    # so off the event loop it goes.
+    recent = await asyncio.to_thread(jobs.list_recent, user_id, 30)
     cleaned = []
     for item in recent:
         job_id = item.get("id")
@@ -446,7 +449,8 @@ async def list_jobs(request: Request):
             "updated_at": item.get("updated_at"),
             # The draft itself is fetched from /status/{job_id} on demand: it is
             # the whole protocol, and this list is reloaded on every tab focus.
-            "has_draft": bool(item.get("draft")),
+            # `list_recent` reports this from its own column without reading it.
+            "has_draft": bool(item.get("has_draft")),
             "truncated": bool(item.get("truncated")),
             "error": item.get("error") if item.get("status") == "error" else None,
         })

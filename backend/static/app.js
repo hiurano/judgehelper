@@ -259,6 +259,14 @@ function pollQueueItem(item) {
     item.pollTimer = setInterval(checkStatus, 5000);
 }
 
+// A flat deadline cannot cover this upload: MAX_UPLOAD_BYTES is a gigabyte by
+// default, which needs about half an hour on a 5 Mbit/s line, while a dead
+// connection should be given up on in minutes. So watch for a *stall* instead
+// of a total, and once the bytes are all sent, allow for the server writing
+// them to disk before it answers.
+const UPLOAD_STALL_MS = 2 * 60 * 1000;
+const UPLOAD_RESPONSE_MS = 10 * 60 * 1000;
+
 function uploadFile(item) {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -267,14 +275,32 @@ function uploadFile(item) {
         for (const [k, v] of Object.entries(item.metadata || {})) {
             if (v) form.append(k, v);
         }
-        xhr.timeout = 10 * 60 * 1000;
+
+        // XHR's own timeout is a total, which is exactly what we cannot use.
+        xhr.timeout = 0;
+        let lastActivity = Date.now();
+        let stalled = false;
+        const watchdog = setInterval(() => {
+            const limit = item.uploadDone ? UPLOAD_RESPONSE_MS : UPLOAD_STALL_MS;
+            if (Date.now() - lastActivity > limit) {
+                stalled = true;
+                clearInterval(watchdog);
+                xhr.abort();
+            }
+        }, 5000);
+        const settle = (fn) => (...args) => { clearInterval(watchdog); fn(...args); };
+        const done = settle(resolve);
+        const fail = settle(reject);
+
         xhr.upload.onprogress = (e) => {
+            lastActivity = Date.now();
             if (e.lengthComputable) {
                 item.progress = Math.round(e.loaded / e.total * 100);
                 renderQueue();
             }
         };
         xhr.upload.onloadend = () => {
+            lastActivity = Date.now();
             item.progress = 100;
             item.uploadDone = true;
             renderQueue();
@@ -283,21 +309,21 @@ function uploadFile(item) {
             if (xhr.status === 401) {
                 const err = new Error('Сессия истекла. Войдите снова в новой вкладке и нажмите «Попробовать снова».');
                 err.code = 'AUTH';
-                reject(err);
+                fail(err);
                 return;
             }
             if (xhr.status === 429) {
                 const err = new Error('Сервер занят другими задачами');
                 err.code = 'LIMIT';
-                reject(err);
+                fail(err);
                 return;
             }
             if (xhr.status >= 200 && xhr.status < 300) {
                 try {
                     const data = JSON.parse(xhr.responseText);
-                    resolve(data.job_id);
+                    done(data.job_id);
                 } catch (e) {
-                    reject(new Error('Сервер вернул битый ответ'));
+                    fail(new Error('Сервер вернул битый ответ'));
                 }
             } else {
                 let msg = `HTTP ${xhr.status}`;
@@ -305,12 +331,17 @@ function uploadFile(item) {
                     const j = JSON.parse(xhr.responseText);
                     if (j.detail) msg += `: ${j.detail}`;
                 } catch (_) {}
-                reject(new Error(msg));
+                fail(new Error(msg));
             }
         };
-        xhr.onerror = () => reject(new Error('Нет соединения с сервером. Проверьте интернет.'));
-        xhr.ontimeout = () => reject(new Error('Сервер не ответил за 10 минут. Попробуйте файл поменьше.'));
-        xhr.onabort = () => reject(new Error('Загрузка прервана'));
+        xhr.onerror = () => fail(new Error('Нет соединения с сервером. Проверьте интернет.'));
+        xhr.onabort = () => fail(new Error(
+            stalled
+                ? (item.uploadDone
+                    ? 'Файл загружен, но сервер не ответил. Обновите страницу — задача могла всё же начаться.'
+                    : 'Передача файла остановилась. Проверьте интернет и попробуйте снова.')
+                : 'Загрузка прервана'
+        ));
         xhr.open('POST', `${BACKEND}/upload`);
         xhr.send(form);
     });
