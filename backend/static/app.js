@@ -95,13 +95,36 @@ function addFilesToQueue(files) {
     renderQueue();
 }
 
+// Mirrors MAX_ACTIVE_JOBS_PER_USER on the server; refreshed from /api/me.
+let maxActiveJobs = 3;
+let retryQueuedTimer = null;
+
 function checkQueueScheduler() {
     const uploadingCount = queue.filter((q) => q.status === 'uploading').length;
     if (uploadingCount >= 2) return;
+    // The server counts everything it is still working on, not just uploads.
+    // Starting a fourth one only earns a 429 and a failed-looking item.
+    const activeCount = queue.filter(
+        (q) => q.status === 'uploading' || q.status === 'processing'
+    ).length;
+    if (activeCount >= maxActiveJobs) return;
     const next = queue.find((q) => q.status === 'queued');
     if (next) {
         processQueueItem(next);
     }
+}
+
+// Safety net for a slot freed by something this tab cannot see: another
+// device, or a job that finished while we were offline.
+function scheduleQueuedRetry() {
+    if (retryQueuedTimer) return;
+    retryQueuedTimer = setTimeout(() => {
+        retryQueuedTimer = null;
+        if (queue.some((q) => q.status === 'queued')) {
+            checkQueueScheduler();
+            scheduleQueuedRetry();
+        }
+    }, 15000);
 }
 
 async function processQueueItem(item) {
@@ -119,6 +142,16 @@ async function processQueueItem(item) {
         checkQueueScheduler();
         pollQueueItem(item);
     } catch (err) {
+        if (err && err.code === 'LIMIT') {
+            // Server is already at its per-user limit: hold this one back
+            // instead of showing the operator a failure they cannot act on.
+            item.status = 'queued';
+            item.progress = 0;
+            renderQueue();
+            scheduleQueuedRetry();
+            releaseWakeLockIfDone();
+            return;
+        }
         if (err && err.code === 'AUTH') {
             item.status = 'auth_required';
             item.error = err.message;
@@ -249,6 +282,12 @@ function uploadFile(item) {
             if (xhr.status === 401) {
                 const err = new Error('Сессия истекла. Войдите снова в новой вкладке и нажмите «Попробовать снова».');
                 err.code = 'AUTH';
+                reject(err);
+                return;
+            }
+            if (xhr.status === 429) {
+                const err = new Error('Сервер занят другими задачами');
+                err.code = 'LIMIT';
                 reject(err);
                 return;
             }
@@ -634,6 +673,18 @@ if (fileInput) {
 }
 
 // Downloads & Error helper
+async function fetchDraft(jobId) {
+    // /jobs lists protocols without their text; pull the one being saved.
+    try {
+        const resp = await fetch(`${BACKEND}/status/${encodeURIComponent(jobId)}`);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.draft || null;
+    } catch (e) {
+        return null;
+    }
+}
+
 async function downloadDocx(text, filename) {
     if (!text || !text.trim()) return;
     try {
@@ -822,7 +873,13 @@ function renderHistory() {
         dlItemBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             dropdownMenu.hidden = true;
-            await downloadDocx(job.draft, nameText);
+            const draft = job.draft || await fetchDraft(job.id);
+            if (!draft) {
+                alert('Не удалось загрузить текст протокола. Проверьте соединение.');
+                return;
+            }
+            job.draft = draft;
+            await downloadDocx(draft, nameText);
         });
 
         const delItemBtn = document.createElement('button');
@@ -908,6 +965,11 @@ async function fetchUserProfile() {
         if (nameEl) nameEl.textContent = name;
         if (planEl) planEl.textContent = `${user.plan || 'Персональный'} доступ`;
         if (statProto) statProto.textContent = user.total_protocols || 0;
+
+        if (Number.isInteger(user.max_active_jobs) && user.max_active_jobs > 0) {
+            maxActiveJobs = user.max_active_jobs;
+            checkQueueScheduler();
+        }
 
         const totalMin = user.total_duration_min || 0;
         const savedMinTotal = Math.round(totalMin * 3.5);

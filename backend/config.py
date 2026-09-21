@@ -41,7 +41,14 @@ ASSEMBLYAI_KEY = os.environ.get("ASSEMBLYAI_API_KEY", "")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BASE_URL = os.environ.get("BASE_URL", "").rstrip("/")
-ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
+
+def parse_origins(raw: str) -> list[str]:
+    """Split a comma-separated origin list, ignoring padding and empty items."""
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+ALLOWED_ORIGINS = parse_origins(os.environ.get("ALLOWED_ORIGINS", ""))
 MODEL = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")

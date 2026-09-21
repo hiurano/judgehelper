@@ -66,6 +66,31 @@ def _looks_like_supported_media(header: bytes) -> bool:
     ))
 
 
+UPLOAD_DIR = BACKEND_DIR / "data" / "uploads"
+
+
+def prune_orphan_uploads() -> int:
+    """Delete audio left on disk by a process that died mid-upload.
+
+    A file is in use for exactly as long as a job row claims it, so anything
+    whose job is no longer active was abandoned: the task that would have
+    deleted it never reached its `finally`. Left alone these are gigabyte-sized
+    files sharing a volume with the database."""
+    if not UPLOAD_DIR.exists():
+        return 0
+    active = {job.get("id") for job in jobs.get_pending_jobs()}
+    removed = 0
+    for path in UPLOAD_DIR.iterdir():
+        if not path.is_file() or path.stem in active:
+            continue
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            log.warning("Could not remove orphaned upload %s", path.name)
+    return removed
+
+
 async def _maintenance_loop():
     """Periodically enforce retention even when the service is never restarted."""
     while True:
@@ -73,6 +98,9 @@ async def _maintenance_loop():
         deleted = await asyncio.to_thread(jobs.cleanup_old, JOB_TTL_DAYS)
         if deleted:
             log.info("Maintenance: pruned %s expired job entries", deleted)
+        orphans = await asyncio.to_thread(prune_orphan_uploads)
+        if orphans:
+            log.info("Maintenance: removed %s orphaned upload file(s)", orphans)
 
 
 @asynccontextmanager
@@ -112,7 +140,13 @@ async def lifespan(app: FastAPI):
         # Start background tasks
         spawn(aai_polling_loop(), name="aai-polling-loop")
         spawn(_maintenance_loop(), name="maintenance-loop")
+
+        # After recovery, so that jobs it has just given up on release their
+        # audio too rather than waiting a day for the maintenance pass.
         await recover_pending_jobs()
+        orphans = prune_orphan_uploads()
+        if orphans:
+            log.info(f"Startup: removed {orphans} orphaned upload file(s)")
     except Exception:
         log.exception("Startup cleanup/recovery failed (non-fatal)")
     yield
@@ -274,14 +308,13 @@ async def upload(
             f"Достигнут лимит активных задач ({MAX_ACTIVE_JOBS_PER_USER}). Дождитесь завершения обработки.",
         )
 
-    upload_dir = BACKEND_DIR / "data" / "uploads"
-    file_path = upload_dir / f"{job_id}{ext}"
+    file_path = UPLOAD_DIR / f"{job_id}{ext}"
 
     # Stream the uploaded file directly to disk to avoid RAM OOM
     size_bytes = 0
     header = b""
     try:
-        upload_dir.mkdir(parents=True, exist_ok=True)
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
             while chunk := await file.read(1024 * 1024):  # 1 MB chunks
                 if not header:
@@ -311,7 +344,10 @@ async def upload(
         "phase": "uploading_to_aai",
         "size_mb": round(size_mb, 1),
     })
-    jobs[job_id] = initial_job
+    if not jobs.update_if_exists(job_id, initial_job):
+        # Cancelled from another tab while the bytes were still arriving.
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(404, "Задача была удалена во время загрузки")
 
     spawn(
         submit_to_assemblyai(job_id, file_path, filename or "audio"),
@@ -342,7 +378,7 @@ async def aai_webhook(payload: dict, x_webhook_secret: Optional[str] = Header(No
 
     if status_val == "error":
         existing.update({"status": "error", "error": "AssemblyAI transcription failed"})
-        jobs[job_id] = existing
+        jobs.update_if_exists(job_id, existing)
         return {"ok": True}
 
     if status_val != "completed":
@@ -395,7 +431,9 @@ async def list_jobs(request: Request):
             "metadata": item.get("metadata", {}),
             "created_at": item.get("created_at"),
             "updated_at": item.get("updated_at"),
-            "draft": item.get("draft") if item.get("status") == "done" else None,
+            # The draft itself is fetched from /status/{job_id} on demand: it is
+            # the whole protocol, and this list is reloaded on every tab focus.
+            "has_draft": bool(item.get("draft")),
             "error": item.get("error") if item.get("status") == "error" else None,
         })
     return {"jobs": cleaned}
@@ -427,6 +465,7 @@ async def get_me(request: Request):
         "plan": "Персональный",
         "total_protocols": stats["total_protocols"],
         "total_duration_min": stats["total_duration_min"],
+        "max_active_jobs": MAX_ACTIVE_JOBS_PER_USER,
     }
 
 

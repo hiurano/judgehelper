@@ -65,6 +65,9 @@ async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log
             full_draft = ""
             total_usage = {"prompt_tokens": 0, "completion_tokens": 0}
             is_completed = False
+            # Kept apart from last_error: the generic "gave up" message below
+            # must not overwrite what the provider actually said went wrong.
+            model_error: Optional[str] = None
 
             for loop_idx in range(5):
                 async def _do_llm_call(current_messages):
@@ -94,20 +97,20 @@ async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log
                 if isinstance(llm_data, dict) and "error" in llm_data:
                     err = llm_data["error"]
                     err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-                    last_error = f"{model}: {err_msg}"
-                    log.warning(f"[{log_prefix}] {last_error}; trying next model")
+                    model_error = f"{model}: {err_msg}"
+                    log.warning(f"[{log_prefix}] {model_error}; trying next model")
                     break
 
                 choices = llm_data.get("choices") if isinstance(llm_data, dict) else None
                 if not choices:
-                    last_error = f"{model}: no choices in response — {str(llm_data)[:300]}"
-                    log.warning(f"[{log_prefix}] {last_error}; trying next model")
+                    model_error = f"{model}: no choices in response — {str(llm_data)[:300]}"
+                    log.warning(f"[{log_prefix}] {model_error}; trying next model")
                     break
 
                 draft = choices[0].get("message", {}).get("content")
                 if not draft:
-                    last_error = f"{model}: empty content in choices[0]"
-                    log.warning(f"[{log_prefix}] {last_error}; trying next model")
+                    model_error = f"{model}: empty content in choices[0]"
+                    log.warning(f"[{log_prefix}] {model_error}; trying next model")
                     break
 
                 full_draft += draft
@@ -128,7 +131,9 @@ async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log
             if is_completed and full_draft:
                 return full_draft, model, total_usage
             else:
-                last_error = f"{model}: Failed to complete draft within iteration limits."
+                last_error = model_error or (
+                    f"{model}: Failed to complete draft within iteration limits."
+                )
                 continue
 
         except Exception as e:

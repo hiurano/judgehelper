@@ -86,6 +86,35 @@ def test_job_store_reserves_active_slots_atomically(temp_job_store):
     assert "job-2" not in temp_job_store
 
 
+def test_update_if_exists_refuses_to_recreate_a_deleted_job(temp_job_store):
+    store = temp_job_store
+    store["job-gone"] = {"status": "processing", "user_id": "alice"}
+
+    # A live row is updated as usual.
+    assert store.update_if_exists("job-gone", {"status": "done", "user_id": "alice"}) is True
+    assert store["job-gone"]["status"] == "done"
+
+    # Once deleted, a background task holding a stale copy cannot bring it back.
+    assert store.delete("job-gone") is True
+    stale_copy = {"status": "done", "draft": "Секретный протокол", "user_id": "alice"}
+    assert store.update_if_exists("job-gone", stale_copy) is False
+    assert store.get("job-gone") is None
+    assert len(store) == 0
+
+
+def test_update_if_exists_keeps_the_owner_when_none_is_given(temp_job_store):
+    store = temp_job_store
+    store["job-owned"] = {"status": "processing", "user_id": "alice"}
+
+    # A partial write must never silently reassign the job to the default user.
+    assert store.update_if_exists("job-owned", {"status": "done"}) is True
+    with store._conn() as conn:
+        owner = conn.execute(
+            "SELECT user_id FROM jobs WHERE id = 'job-owned'"
+        ).fetchone()[0]
+    assert owner == "alice"
+
+
 def test_password_hashing_and_legacy_upgrade(tmp_path):
     import hashlib
     from backend.db import UserStore, hash_password, verify_password

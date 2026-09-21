@@ -80,7 +80,7 @@ async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
         aai_transcript_id = await async_retry(_do_submit, retries=3, delay=1.0)
 
         now = int(time.time())
-        existing = jobs.get(job_id, {})
+        existing = jobs.get(job_id) or {}
         existing.update({
             "status": "processing",
             "phase": "transcribing",
@@ -88,17 +88,19 @@ async def submit_to_assemblyai(job_id: str, file_path: Path, filename: str):
             "aai_transcript_id": aai_transcript_id,
             "aai_started_at": now,
         })
-        jobs[job_id] = existing
+        if not jobs.update_if_exists(job_id, existing):
+            log.info(f"[{job_id}] Job deleted during upload — not recreating it")
+            return
         log.info(f"[{job_id}] AssemblyAI aai_transcript_id={aai_transcript_id}")
     except Exception as e:
         log.exception(f"[{job_id}] background submit to AssemblyAI failed")
-        existing = jobs.get(job_id, {})
+        existing = jobs.get(job_id) or {}
         existing.update({
             "status": "error",
             "error": "Не удалось отправить файл на расшифровку. Повторите попытку позже.",
             "phase": "error",
         })
-        jobs[job_id] = existing
+        jobs.update_if_exists(job_id, existing)
     finally:
         # Clean up the temporary file from disk
         if isinstance(file_path, Path):
@@ -162,19 +164,20 @@ async def aai_polling_loop():
                             "phase": "error",
                             "error": "Сервис распознавания не смог обработать запись.",
                         })
-                        jobs[job_id] = cached
+                        jobs.update_if_exists(job_id, cached)
                     elif aai_status == "completed":
                         cached.update({
                             "status": "processing",
                             "phase": "drafting",
                             "drafting_started_at": cached.get("drafting_started_at") or int(time.time()),
                         })
-                        jobs[job_id] = cached
+                        if not jobs.update_if_exists(job_id, cached):
+                            return
                         if not lock.locked():
                             spawn(process_transcript(job_id), name=f"process:{job_id}")
                     else:
                         cached.update({"aai_status": aai_status})
-                        jobs[job_id] = cached
+                        jobs.update_if_exists(job_id, cached)
 
                 except Exception as inner_e:
                     log.error(f"[{job_id}] Polling error: {inner_e}")

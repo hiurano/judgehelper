@@ -116,6 +116,11 @@ class JobStore:
         return v
 
     def __setitem__(self, job_id: str, data: dict):
+        """Insert or overwrite a job outright.
+
+        This creates the row if it is missing, so it is for code that owns the
+        job's existence. Anything writing back state it read earlier wants
+        `update_if_exists` instead."""
         payload = json.dumps(data, ensure_ascii=False, default=str)
         ts = int(time.time())
         user_id = data.get("user_id", DEFAULT_USER)
@@ -133,6 +138,34 @@ class JobStore:
                        aai_transcript_id = excluded.aai_transcript_id""",
                 (job_id, payload, ts, user_id, status, aai_transcript_id),
             )
+
+    def update_if_exists(self, job_id: str, data: dict) -> bool:
+        """Persist changes to a row that still exists, and only then.
+
+        Background work outlives the request that started it, so a job can be
+        deleted by its owner while a task is still holding a copy of it in
+        memory. `__setitem__` would insert that copy straight back, reviving a
+        deleted protocol under the default account; this refuses instead and
+        lets the caller stop."""
+        payload = json.dumps(data, ensure_ascii=False, default=str)
+        ts = int(time.time())
+        user_id = data.get("user_id")
+        status = data.get("status")
+        aai_transcript_id = data.get("aai_transcript_id")
+
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                """UPDATE jobs SET
+                       data = ?,
+                       updated_at = ?,
+                       user_id = COALESCE(?, user_id),
+                       status = ?,
+                       aai_transcript_id = ?
+                   WHERE id = ?""",
+                (payload, ts, user_id, status, aai_transcript_id, job_id),
+            )
+            updated = cur.rowcount > 0
+        return updated
 
     def __contains__(self, job_id: str) -> bool:
         return self.get(job_id) is not None
