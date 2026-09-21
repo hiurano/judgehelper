@@ -72,6 +72,62 @@ def test_upload_endpoint_file_validation(auth_client):
     assert "Содержимое файла" in resp_disguised.json()["detail"]
 
 
+def test_a_handler_refuses_rather_than_assuming_an_account():
+    """Authorization must never fall back to a default user.
+
+    Every handler used to read the username with a DEFAULT_USER fallback, so
+    a path added to PUBLIC_PATHS by mistake would have served that account's
+    protocols to an anonymous caller instead of refusing."""
+    import backend.main as main_mod
+    from fastapi import HTTPException
+
+    class _Anonymous:
+        state = type("S", (), {})()
+        url = type("U", (), {"path": "/jobs"})()
+
+    with pytest.raises(HTTPException) as excinfo:
+        main_mod.current_user(_Anonymous())
+
+    assert excinfo.value.status_code == 401
+
+
+def test_upload_is_refused_when_the_volume_is_nearly_full(auth_client, monkeypatch):
+    """The database shares this volume; audio must not be what fills it."""
+    import backend.main as main_mod
+
+    # Just under the reserve, so the declared size cannot possibly fit.
+    monkeypatch.setattr(
+        main_mod, "_free_disk_bytes", lambda: main_mod.DISK_RESERVE_BYTES - 1
+    )
+
+    response = auth_client.post(
+        "/upload",
+        files={"file": ("zasedanie.mp3", b"ID3\x03\x00" + b"\x00" * 64, "audio/mpeg")},
+    )
+
+    assert response.status_code == 507
+    assert "недостаточно места" in response.json()["detail"]
+
+
+def test_upload_proceeds_when_free_space_cannot_be_read(auth_client, monkeypatch):
+    """An unreadable volume is not a reason to turn a judge away."""
+    import backend.main as main_mod
+
+    monkeypatch.setattr(main_mod, "_free_disk_bytes", lambda: None)
+    monkeypatch.setattr(
+        main_mod, "spawn", lambda coro, name: coro.close()
+    )
+
+    response = auth_client.post(
+        "/upload",
+        files={"file": ("zasedanie.mp3", b"ID3\x03\x00" + b"\x00" * 64, "audio/mpeg")},
+    )
+
+    assert response.status_code == 200
+    from backend.db import jobs
+    jobs.delete(response.json()["job_id"])
+
+
 def test_render_docx_endpoint_validation(auth_client):
     # Empty payload should return 400
     response = auth_client.post("/render-docx", json={"text": ""})

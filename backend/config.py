@@ -55,9 +55,15 @@ AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
 DB_PATH = os.environ.get("DB_PATH") or str(BACKEND_DIR / "data" / "jobs.db")
 JOB_TTL_DAYS = int(os.environ.get("JOB_TTL_DAYS", "30"))
+# Owner recorded for a job written without one. Never an authorization
+# fallback: handlers refuse rather than assume an account (see current_user).
 DEFAULT_USER = os.environ.get("DEFAULT_USER", "admin")
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
-MAX_RENDER_TEXT_CHARS = int(os.environ.get("MAX_RENDER_TEXT_CHARS", "2000000"))
+# Rendering is a paragraph at a time in pure Python: measured at ~2.6 s for
+# 500k characters and ~9.6 s for two million. A hearing's protocol runs to tens
+# of thousands, so the old two-million cap only bounded how long one request
+# could hold a worker thread.
+MAX_RENDER_TEXT_CHARS = int(os.environ.get("MAX_RENDER_TEXT_CHARS", "500000"))
 MAX_ACTIVE_JOBS_PER_USER = int(os.environ.get("MAX_ACTIVE_JOBS_PER_USER", "3"))
 # A job holds one of the user's active slots until it reaches `done` or `error`,
 # and nothing else ever moves it off `processing`: AssemblyAI can drop a
