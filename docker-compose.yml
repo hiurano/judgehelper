@@ -51,7 +51,10 @@ services:
       judge-helper:
         condition: service_healthy
     volumes:
-      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The directory, not the file: a single-file bind mount follows the
+      # inode, and `git pull` replaces the file rather than rewriting it, so
+      # the container would keep serving the config from the previous commit.
+      - ./deploy/caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     security_opt:
