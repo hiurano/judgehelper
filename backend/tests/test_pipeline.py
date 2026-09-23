@@ -61,7 +61,7 @@ def test_process_transcript_writes_the_draft(fake_aai, monkeypatch):
         "aai_transcript_id": "aai-happy-path",
     }
 
-    async def _fake_llm(client, user_msg, log_prefix):
+    async def _fake_llm(client, user_msg, log_prefix, **kwargs):
         return Draft("ПРОТОКОЛ судебного заседания", "test-model", {"prompt_tokens": 10})
 
     monkeypatch.setattr(pipeline, "call_llm_with_fallback", _fake_llm)
@@ -84,7 +84,7 @@ def test_a_truncated_draft_is_saved_and_flagged(fake_aai, monkeypatch):
         "aai_transcript_id": "aai-truncated",
     }
 
-    async def _fake_llm(client, user_msg, log_prefix):
+    async def _fake_llm(client, user_msg, log_prefix, **kwargs):
         return Draft("Протокол обрывается на середине", "test-model", {}, truncated=True)
 
     monkeypatch.setattr(pipeline, "call_llm_with_fallback", _fake_llm)
@@ -109,7 +109,7 @@ def test_process_transcript_does_not_resurrect_a_deleted_job(fake_aai, monkeypat
         "aai_transcript_id": "aai-midflight",
     }
 
-    async def _fake_llm(client, user_msg, log_prefix):
+    async def _fake_llm(client, user_msg, log_prefix, **kwargs):
         # The owner deletes the protocol while the model is still drafting.
         assert jobs.delete(job_id) is True
         return Draft("Текст удалённого протокола", "test-model", {})
@@ -124,7 +124,7 @@ def test_process_transcript_does_not_resurrect_a_deleted_job(fake_aai, monkeypat
 def test_process_transcript_skips_a_job_that_is_already_gone(fake_aai, monkeypatch):
     called = False
 
-    async def _fake_llm(client, user_msg, log_prefix):
+    async def _fake_llm(client, user_msg, log_prefix, **kwargs):
         nonlocal called
         called = True
         return Draft("draft", "test-model", {})
@@ -231,9 +231,11 @@ def test_a_long_transcript_is_drafted_in_parts_and_joined(monkeypatch):
         pipeline, "get_shared_client", lambda: _FakeAaiClient(LONG_TRANSCRIPT)
     )
     prompts = []
+    structures = []
 
-    async def _fake_llm(client, user_msg, log_prefix):
+    async def _fake_llm(client, user_msg, log_prefix, **kwargs):
         prompts.append(user_msg)
+        structures.append(kwargs["structure_instruction"])
         part = len(prompts)
         return Draft(
             f"[КЛЮЧ РОЛЕЙ: Спикер A = Судья]\nЧасть {part} протокола.",
@@ -256,6 +258,11 @@ def test_a_long_transcript_is_drafted_in_parts_and_joined(monkeypatch):
     assert stored["total_chunks"] > 1
     assert len(prompts) == stored["total_chunks"]
     assert stored["current_chunk"] == stored["total_chunks"]
+
+    assert "Шапку протокола и вводную часть оформи только здесь" in structures[0]
+    assert all("Не повторяй шапку" in item for item in structures[1:])
+    assert all("Не добавляй заключительный шаблон" in item for item in structures[:-1])
+    assert "подписи оформи один раз" in structures[-1]
 
     # Every part is in the protocol, in order...
     for part in range(1, len(prompts) + 1):
@@ -283,7 +290,7 @@ def test_one_truncated_part_flags_the_whole_protocol(monkeypatch):
     )
     calls = {"n": 0}
 
-    async def _fake_llm(client, user_msg, log_prefix):
+    async def _fake_llm(client, user_msg, log_prefix, **kwargs):
         calls["n"] += 1
         # Only the second part runs out of room.
         return Draft(f"Часть {calls['n']}.", "test-model", {}, truncated=calls["n"] == 2)

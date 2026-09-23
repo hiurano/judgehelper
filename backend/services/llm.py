@@ -69,7 +69,39 @@ def split_transcript_into_chunks(formatted_text: str, max_chunk_chars: int = 120
     return chunks
 
 
-async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log_prefix: str) -> Draft:
+def chunk_structure_instruction(index: int, total: int) -> str:
+    """Override the full-document template for one technical transcript chunk."""
+    if not 0 <= index < total or total < 2:
+        raise ValueError("Expected a chunk index within a multipart transcript")
+    opening = (
+        "Шапку протокола и вводную часть оформи только здесь, один раз."
+        if index == 0 else
+        "Не повторяй шапку: ПРОТОКОЛ, судебного заседания, город, состав суда и "
+        "вводный шаблон «Судебное заседание открыто». Начни сразу с продолжения содержания."
+    )
+    ending = (
+        "Итоговый блок и подписи оформи один раз в конце этой последней части. "
+        "Закрытие или отложение заседания указывай только по стенограмме."
+        if index == total - 1 else
+        "Не добавляй заключительный шаблон, приобщение носителя и подписи. "
+        "Не объявляй заседание закрытым из-за конца технической части."
+    )
+    return (
+        f"ПРАВИЛА ТЕХНИЧЕСКОЙ ЧАСТИ {index + 1} ИЗ {total}. "
+        "Они имеют приоритет над требованиями шаблона полного документа выше. "
+        "Это фрагменты одной записи для единого протокола, а не отдельные заседания. "
+        f"{opening} {ending} "
+        "Реальные объявления перерыва, возобновления или нового заседания сохраняй "
+        "по стенограмме в ходе протокола, без повторения полной шапки. "
+        "Предыдущий контекст дан только для связности и ролей: не переписывай его. "
+        "Оформи все новые реплики текущего фрагмента без пропусков."
+    )
+
+
+async def call_llm_with_fallback(
+    client: "httpx.AsyncClient", user_msg: str, log_prefix: str,
+    *, structure_instruction: str = "",
+) -> Draft:
     """Try each model in LLM_FALLBACK_CHAIN until one returns a valid draft.
     Handles finish_reason='length' by prompting the model to continue.
     Returns a Draft. Raises only if no model produced any text at all."""
@@ -81,7 +113,7 @@ async def call_llm_with_fallback(client: "httpx.AsyncClient", user_msg: str, log
     for model in LLM_FALLBACK_CHAIN:
         try:
             messages = [
-                {"role": "system", "content": get_system_prompt()},
+                {"role": "system", "content": get_system_prompt() + ("\n\n" + structure_instruction if structure_instruction else "")},
                 {"role": "user", "content": user_msg},
             ]
             full_draft = ""

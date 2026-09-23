@@ -173,3 +173,24 @@ def test_raises_when_every_model_fails(two_model_chain):
         asyncio.run(llm.call_llm_with_fallback(client, "стенограмма", "job-5"))
 
     assert "second is down" in str(excinfo.value)
+
+
+def test_chunk_structure_survives_continuation_and_fallback(two_model_chain, monkeypatch):
+    monkeypatch.setattr(llm, "get_system_prompt", lambda: "Полный шаблон с шапкой и подписями.")
+    client = _FakeClient([
+        _completion("Начало реплики", finish_reason="length"),
+        {"error": {"message": "unavailable"}},
+        _completion("Продолжение протокола"),
+    ])
+    instruction = llm.chunk_structure_instruction(1, 3)
+    result = asyncio.run(llm.call_llm_with_fallback(
+        client, "Текущий фрагмент", "job-chunk", structure_instruction=instruction,
+    ))
+    assert result.text == "Продолжение протокола"
+    assert len(client.requests) == 3
+    for request in client.requests:
+        system = request["messages"][0]
+        assert system["role"] == "system"
+        assert system["content"].endswith(instruction)
+        assert "Не повторяй шапку" in system["content"]
+        assert "Не добавляй заключительный шаблон" in system["content"]
