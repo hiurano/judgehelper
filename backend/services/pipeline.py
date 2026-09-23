@@ -10,7 +10,9 @@ from backend.config import (
 )
 from backend.db import get_lock, jobs, remove_lock
 from backend.services.http_client import async_retry, get_shared_client
-from backend.services.llm import call_llm_with_fallback, split_transcript_into_chunks
+from backend.services.llm import (
+    call_llm_with_fallback, chunk_structure_instruction, split_transcript_into_chunks,
+)
 from backend.services.text_cleaner import clean_transcript, format_metadata_block
 from backend.services.task_manager import spawn
 
@@ -227,7 +229,8 @@ async def process_transcript(job_id: str):
                             )
 
                         chunk_result = await call_llm_with_fallback(
-                            client, prompt, f"{job_id}-chunk-{idx + 1}"
+                            client, prompt, f"{job_id}-chunk-{idx + 1}",
+                            structure_instruction=chunk_structure_instruction(idx, total_chunks),
                         )
                         c_draft, c_model, c_usage = (
                             chunk_result.text, chunk_result.model, chunk_result.usage
