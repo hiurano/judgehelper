@@ -4,13 +4,13 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
-User=judge-helper
-Group=judge-helper
-WorkingDirectory=/srv/judge-helper
+User=judgehelper
+Group=judgehelper
+WorkingDirectory=/srv/judgehelper
 ExecStart=/usr/bin/python3 -m scripts.backup_db
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadOnlyPaths=/etc/judge-helper
-ReadWritePaths=/var/lib/judge-helper /var/backups/judge-helper
+ReadOnlyPaths=/etc/judgehelper
+ReadWritePaths=/var/lib/judgehelper /var/backups/judgehelper

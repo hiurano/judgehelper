@@ -130,7 +130,7 @@ async def call_llm_with_fallback(
                         headers={
                             "Authorization": f"Bearer {OPENROUTER_KEY}",
                             "Content-Type": "application/json",
-                            "HTTP-Referer": "https://github.com/hiurano/judge-helper",
+                            "HTTP-Referer": "https://github.com/hiurano/judgehelper",
                             "X-OpenRouter-Title": "Judge Helper",
                         },
                         json={

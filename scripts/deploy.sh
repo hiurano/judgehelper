@@ -44,7 +44,7 @@ env_target="$(readlink -f "$project_dir/$env_file")"
 # SQLite creates -wal/-shm sidecars owned by whoever opens the database. The
 # app runs as APP_UID:APP_GID and cannot use sidecars left by the deploying
 # user, so take the pre-deploy backup as the service account -- the same one
-# judge-helper-backup.service uses for the scheduled backup.
+# judgehelper-backup.service uses for the scheduled backup.
 run_backup() {
     if [ "$(id -u)" = "$app_uid" ] && [ "$(id -g)" = "$app_gid" ]; then
         run_python -m scripts.backup_db
@@ -71,8 +71,10 @@ run_backup() {
         python:3.12-slim python -m scripts.backup_db
 }
 
-app_image="judge-helper:latest"
-rollback_image="judge-helper:rollback"
+app_image="judgehelper:latest"
+# Labels the build; see the rollback tagging below.
+export DEPLOY_COMMIT="$(git rev-parse HEAD)"
+rollback_image="judgehelper:rollback"
 
 prompt_file="$(absolute "$(read_env PROMPT_FILE prompts/system-protocol.md)")"
 
@@ -88,12 +90,12 @@ check_prompt_mount() {
     # vim's default save -- leaves the container reading the old text, and the
     # advertised hot-reload silently stops working. Compare the two sides and
     # re-bind if they have drifted apart.
-    if [ -z "$(docker compose ps --quiet judge-helper 2>/dev/null)" ]; then
+    if [ -z "$(docker compose ps --quiet judgehelper 2>/dev/null)" ]; then
         return 0
     fi
     local on_host in_container
     on_host="$(file_digest "$prompt_file")"
-    in_container="$(docker compose exec -T judge-helper python -c \
+    in_container="$(docker compose exec -T judgehelper python -c \
         "import hashlib;print(hashlib.sha256(open('/app/prompts/system-protocol.md','rb').read()).hexdigest())" \
         2>/dev/null | tr -d '\r')"
     if [ -z "$in_container" ] || [ "$on_host" = "unreadable" ]; then
@@ -104,8 +106,8 @@ check_prompt_mount() {
         return 0
     fi
     echo "The container is serving an out-of-date system prompt (the mount lost"
-    echo "track of the file). Recreating judge-helper to pick up the current one..."
-    docker compose up -d --force-recreate --no-build judge-helper || true
+    echo "track of the file). Recreating judgehelper to pick up the current one..."
+    docker compose up -d --force-recreate --no-build judgehelper || true
     if ! wait_for_ready; then
         echo "The service did not come back after refreshing the prompt mount." >&2
         return 1
@@ -134,7 +136,7 @@ reload_caddy() {
 wait_for_ready() {
     local attempt
     for attempt in $(seq 1 30); do
-        if docker compose exec -T judge-helper python -c \
+        if docker compose exec -T judgehelper python -c \
             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)" \
             >/dev/null 2>&1; then
             return 0
@@ -152,11 +154,22 @@ docker compose config --quiet
 # to. Resolve it from the running container rather than from a tag: the tag may
 # not exist yet, and the container is the honest answer to what is live.
 rollback_available=0
-current_container="$(docker compose ps --quiet judge-helper 2>/dev/null | head -n 1)"
+current_container="$(docker compose ps --quiet judgehelper 2>/dev/null | head -n 1)"
 if [ -n "$current_container" ]; then
     current_image="$(docker inspect --format '{{.Image}}' "$current_container" 2>/dev/null || true)"
     if [ -n "$current_image" ]; then
-        docker tag "$current_image" "$rollback_image"
+        current_commit="$(docker image inspect --format \
+            '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+            "$current_image" 2>/dev/null || true)"
+        # Builds are not reproducible, so a redeploy of the live commit yields a
+        # new image id. Retagging the live image then would drop the previous
+        # release, and the rollback would point at the very code being deployed.
+        if [ "$current_commit" = "$DEPLOY_COMMIT" ] \
+            && docker image inspect "$rollback_image" >/dev/null 2>&1; then
+            echo "Redeploying the live commit; keeping the existing rollback image."
+        else
+            docker tag "$current_image" "$rollback_image"
+        fi
         rollback_available=1
     fi
 fi
@@ -192,7 +205,7 @@ if wait_for_ready; then
 fi
 
 echo "Deployment failed: backend did not become ready." >&2
-docker compose logs --tail=100 judge-helper >&2
+docker compose logs --tail=100 judgehelper >&2
 
 if [ "$rollback_available" = "0" ]; then
     echo "No previous image to roll back to; the service is down." >&2
@@ -211,5 +224,5 @@ if wait_for_ready; then
 fi
 
 echo "Rollback failed as well; the service is down and needs a human." >&2
-docker compose logs --tail=100 judge-helper >&2
+docker compose logs --tail=100 judgehelper >&2
 exit 1

@@ -1,15 +1,29 @@
+# Fixed project name: volume and network names must not depend on the name of
+# the checkout directory.
+name: judgehelper
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
-  judge-helper:
+  judgehelper:
     build:
       context: .
       dockerfile: Dockerfile
       # NixOS/Tailscale may expose MagicDNS only on the host namespace.
       network: host
+      labels:
+        # deploy.sh compares this with HEAD to spot a redeploy of the live commit.
+        org.opencontainers.image.revision: ${DEPLOY_COMMIT:-unknown}
     # Explicit tag so deploy.sh can keep the previous build under a rollback
     # tag and point this one back at it when a rollout fails.
-    image: judge-helper:latest
-    container_name: judge-helper
+    image: judgehelper:latest
+    container_name: judgehelper
     restart: unless-stopped
+    logging: *default-logging
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     env_file:
       - ${ENV_FILE:-.env}
@@ -36,8 +50,9 @@ services:
 
   caddy:
     image: caddy:2.11.4-alpine
-    container_name: judge-helper-caddy
+    container_name: judgehelper-caddy
     restart: unless-stopped
+    logging: *default-logging
     dns:
       - 1.1.1.1
       - 8.8.8.8
@@ -48,7 +63,7 @@ services:
     environment:
       CADDY_DOMAIN: ${CADDY_DOMAIN:?CADDY_DOMAIN must be set}
     depends_on:
-      judge-helper:
+      judgehelper:
         condition: service_healthy
     volumes:
       # The directory, not the file: a single-file bind mount follows the
