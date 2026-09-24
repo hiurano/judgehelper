@@ -100,20 +100,29 @@ jobs:
       - name: Configure SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
+          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ]; then
+            echo "DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS secrets are required" >&2
+            exit 1
+          fi
           install -d -m 700 ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           # Pinned host key: never accept an unknown one unattended.
-          printf '%s\n' \
-            "82.40.57.223 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILdPcKk9qqKD26umy2Df9n+Z2FefK+DHIuik/WXCFb3T" \
-            > ~/.ssh/known_hosts
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       - name: Deploy to production
         # authorized_keys pins this key to a forced command, so the server
         # decides what runs; nothing is passed from here.
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
+          if [ -z "$DEPLOY_HOST" ]; then
+            echo "DEPLOY_HOST secret is required" >&2
+            exit 1
+          fi
           ssh -i ~/.ssh/id_ed25519 \
               -o BatchMode=yes \
               -o ConnectTimeout=15 \
-              deploy@82.40.57.223
+              deploy@"$DEPLOY_HOST"

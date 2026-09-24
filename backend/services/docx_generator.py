@@ -91,7 +91,7 @@ def render_docx(text: str) -> bytes:
         if stripped.startswith("```"):
             continue
 
-        # Fix collapsed signatures like "ПредседательствующийВ.А. Сидоров" or "Помощник судьиА.И. Фёдорова"
+        # Fix collapsed signatures like "ПредседательствующийИ.И. Иванов" or "Помощник судьиА.А. Петрова"
         sig_match = SIG_PATTERN.match(stripped)
         if sig_match:
             role, name = sig_match.group(1), sig_match.group(2).strip()
