@@ -167,7 +167,7 @@ journalctl -u judgehelper-backup.service --since today
 
 Ручной путь выше остаётся рабочим, но штатный способ выкатки — GitHub Actions.
 Job `deploy` в `.github/workflows/ci.yml` запускается **только** после зелёного
-`test`, только для ветки `main` и никогда для pull request. Его можно запустить
+`test` и `browser-test`, только для ветки `main` и никогда для pull request. Его можно запустить
 и вручную — вкладка Actions, кнопка Run workflow, либо:
 
 ```bash

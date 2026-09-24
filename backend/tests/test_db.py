@@ -262,3 +262,50 @@ def test_password_change_increments_session_version(tmp_path):
     original = store.get_session_version("alice")
     assert store.change_password("alice", "new-password")
     assert store.get_session_version("alice") == original + 1
+
+
+def test_existing_accounts_gain_stable_independent_ids(tmp_path):
+    import sqlite3
+    from backend.db import UserStore, hash_password
+
+    path = str(tmp_path / 'legacy.db')
+    with sqlite3.connect(path) as conn:
+        conn.execute('CREATE TABLE users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, display_name TEXT, created_at INTEGER NOT NULL, session_version INTEGER NOT NULL DEFAULT 1)')
+        conn.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?)', ('alice', hash_password('password'), 'Alice', 1, 3))
+    users = UserStore(path)
+    owner = users.get_account_id('alice')
+    assert owner
+    assert users.verify('alice', 'password')
+    assert users.get_session_version('alice') == 3
+    assert UserStore(path).get_account_id('alice') == owner
+    users.change_password('alice', 'other-password')
+    assert users.get_account_id('alice') == owner
+    users.create_user('bob', 'password')
+    assert users.get_account_id('bob') != owner
+
+
+@pytest.mark.parametrize('already_added_columns', [False, True])
+def test_old_jobs_recover_indexed_status_and_transcript_id(tmp_path, already_added_columns):
+    import json
+    import sqlite3
+    from backend.db import JobStore
+    path = str(tmp_path / 'old-jobs.db')
+    with sqlite3.connect(path) as conn:
+        conn.execute('CREATE TABLE jobs (id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL, user_id TEXT)')
+        if already_added_columns:
+            conn.execute('ALTER TABLE jobs ADD COLUMN status TEXT')
+            conn.execute('ALTER TABLE jobs ADD COLUMN aai_transcript_id TEXT')
+        for key, data in [
+            ('pending', {'status': 'processing', 'aai_transcript_id': 'aai-id', 'user_id': 'alice'}),
+            ('done', {'status': 'done', 'draft': 'protocol', 'duration_min': 12, 'user_id': 'alice'}),
+        ]:
+            conn.execute('INSERT INTO jobs (id,data,updated_at,user_id) VALUES (?,?,?,?)', (key, json.dumps(data), 123, 'alice'))
+        conn.execute("INSERT INTO jobs (id,data,updated_at,user_id) VALUES ('corrupt','not json',123,'alice')")
+    for _ in range(2):  # Reopening must preserve the migrated state and retention timestamps.
+        store = JobStore(path)
+        assert [job['id'] for job in store.get_pending_jobs()] == ['pending']
+        assert store.get_by_aai_id('aai-id')[0] == 'pending'
+        assert store.get_user_stats('alice') == {'total_protocols': 1, 'total_duration_min': 12.0}
+        assert store.get('done')['draft'] == 'protocol'
+        with store._conn() as conn:
+            assert {row[0] for row in conn.execute('SELECT updated_at FROM jobs')} == {123}

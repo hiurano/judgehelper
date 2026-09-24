@@ -76,11 +76,15 @@ function releaseWakeLockIfDone() {
 // Queue State & Processing
 // =========================================================================
 let queue = [];
+const cancelledJobIds = new Set();
 
-function addFilesToQueue(files) {
+function addFilesToQueue(files, recording = null) {
+    const added = [];
     for (const f of Array.from(files)) {
         const fileMeta = { defendant: cleanSurname(f.name) };
         const item = {
+            recordingId: recording && recording.id,
+            recordingOwner: recording && recording.owner,
             key: 'q_' + Math.random().toString(36).slice(2, 10),
             file: f,
             filename: f.name,
@@ -90,9 +94,11 @@ function addFilesToQueue(files) {
             progress: 0,
         };
         queue.push(item);
+        added.push(item);
     }
     showCard('queue-card');
     renderQueue();
+    return added;
 }
 
 // Mirrors MAX_ACTIVE_JOBS_PER_USER on the server; refreshed from /api/me.
@@ -127,24 +133,59 @@ function scheduleQueuedRetry() {
     }, 15000);
 }
 
+async function deleteRemoteJob(jobId) {
+    const response = await fetch(`${BACKEND}/jobs/${jobId}`, { method: 'DELETE' });
+    if (!response.ok && response.status !== 404) throw new Error('Не удалось удалить задачу на сервере');
+}
+
 async function processQueueItem(item) {
+    let finished;
+    item.uploadSettled = new Promise(resolve => { finished = resolve; });
     item.status = 'uploading';
+    item.uploadDone = false;
+    item.cancelRequested = false;
     item.progress = 0;
+    item.retryMode = 'upload';
     renderQueue();
     acquireWakeLock();
     try {
+        if (!item.file) throw new Error('Выберите исходный аудиофайл для повторной обработки.');
+        if (item.recordingId) await requireRecordingOwner(item.recordingOwner);
+        if (item.cancelRequested) return;
+        const reservation = await fetch(`${BACKEND}/uploads`, { method: 'POST', signal: AbortSignal.timeout(30000) });
+        if (!reservation.ok) {
+            const error = new Error('Не удалось начать загрузку');
+            error.code = reservation.status === 429 ? 'LIMIT' : reservation.status === 401 ? 'AUTH' : 'UPLOAD';
+            throw error;
+        }
+        item.jobId = (await reservation.json()).job_id;
+        if (item.cancelRequested) return;
         const jobId = await uploadFile(item);
         item.jobId = jobId;
+        if (item.cancelRequested) return;
+        if (item.recordingId) {
+            try { await recordingStore.attachJob(item.recordingId, jobId); }
+            catch (error) { console.error('Could not save upload receipt', error); }
+        }
+        if (item.cancelRequested) return;
         item.status = 'processing';
+        item.retryMode = 'status';
         item.phase = 'uploading_to_aai';
         item.pollStart = Date.now();
         renderQueue();
         checkQueueScheduler();
         pollQueueItem(item);
     } catch (err) {
+        if (item.cancelRequested) return;
+        if (item.jobId && err.httpStatus) {
+            try {
+                await deleteRemoteJob(item.jobId);
+                item.jobId = null;
+            } catch (_) { /* Keep the ID so a retry checks this job first. */ }
+        }
+        if (item.cancelRequested) return;
+        item.retryMode = item.jobId ? 'status' : 'upload';
         if (err && err.code === 'LIMIT') {
-            // Server is already at its per-user limit: hold this one back
-            // instead of showing the operator a failure they cannot act on.
             item.status = 'queued';
             item.progress = 0;
             renderQueue();
@@ -152,35 +193,68 @@ async function processQueueItem(item) {
             releaseWakeLockIfDone();
             return;
         }
-        if (err && err.code === 'AUTH') {
-            item.status = 'auth_required';
-            item.error = err.message;
-            renderQueue();
-            checkQueueScheduler();
-            releaseWakeLockIfDone();
-            return;
-        }
-        item.status = 'error';
+        item.status = err && err.code === 'AUTH' ? 'auth_required' : 'error';
         item.error = err.message || String(err);
         renderQueue();
         checkQueueScheduler();
         releaseWakeLockIfDone();
+    } finally {
+        finished();
     }
+}
+
+async function retryQueueItem(item) {
+    item.error = null;
+    item.reconnecting = false;
+    if (item.jobId && item.retryMode !== 'upload') {
+        item.status = 'processing';
+        renderQueue();
+        acquireWakeLock();
+        pollQueueItem(item);
+        await item.forceCheck();
+        return;
+    }
+    if (!item.file) return;
+    if (item.jobId) {
+        try { await deleteRemoteJob(item.jobId); }
+        catch (error) { item.error = error.message; renderQueue(); return; }
+    }
+    item.jobId = null;
+    item.status = 'queued';
+    renderQueue();
+    checkQueueScheduler();
 }
 
 function pollQueueItem(item) {
     if (item.pollTimer) clearInterval(item.pollTimer);
     let failures = 0;
+    let checking = false;
     const MAX_FAILURES = 30; // 30 * 5s = 2.5 minutes grace period for cold-starts/network blips
 
     const checkStatus = async () => {
+        if (checking || item.cancelRequested || item.removed) return;
         if (item.status === 'done' || item.status === 'error' || item.status === 'auth_required') {
             if (item.pollTimer) clearInterval(item.pollTimer);
             return;
         }
+        checking = true;
         try {
             const resp = await fetch(`${BACKEND}/status/${item.jobId}`);
+            if (item.cancelRequested || item.removed) return;
+            if (resp.status === 401 || resp.status === 404) {
+                clearInterval(item.pollTimer);
+                item.status = resp.status === 401 ? 'auth_required' : 'error';
+                item.retryMode = resp.status === 401 ? 'status' : 'upload';
+                item.error = resp.status === 401
+                    ? 'Сессия истекла. Войдите снова для проверки задачи.'
+                    : 'Задача больше недоступна. Для повторной обработки нужен исходный файл.';
+                renderQueue();
+                checkQueueScheduler();
+                releaseWakeLockIfDone();
+                return;
+            }
             if (!resp.ok) {
+                item.retryMode = 'status';
                 failures++;
                 if (failures >= MAX_FAILURES) {
                     if (item.pollTimer) clearInterval(item.pollTimer);
@@ -200,9 +274,11 @@ function pollQueueItem(item) {
                 item.reconnecting = false;
             }
             const data = await resp.json();
+            if (item.cancelRequested || item.removed) return;
             if (data.status === 'done') {
                 if (item.pollTimer) clearInterval(item.pollTimer);
                 item.status = 'done';
+                await removeLocalRecording(item);
                 item.phase = 'done';
                 item.draft = data.draft;
                 item.duration_min = data.duration_min;
@@ -221,6 +297,7 @@ function pollQueueItem(item) {
             } else if (data.status === 'error') {
                 if (item.pollTimer) clearInterval(item.pollTimer);
                 item.status = 'error';
+                item.retryMode = 'upload';
                 item.error = data.error || 'Неизвестная ошибка обработки';
                 renderQueue();
                 checkQueueScheduler();
@@ -240,6 +317,8 @@ function pollQueueItem(item) {
                 renderQueue();
             }
         } catch (err) {
+            if (item.cancelRequested || item.removed) return;
+            item.retryMode = 'status';
             failures++;
             if (failures >= MAX_FAILURES) {
                 if (item.pollTimer) clearInterval(item.pollTimer);
@@ -252,6 +331,8 @@ function pollQueueItem(item) {
                 item.reconnecting = true;
                 renderQueue();
             }
+        } finally {
+            checking = false;
         }
     };
 
@@ -270,6 +351,7 @@ const UPLOAD_RESPONSE_MS = 10 * 60 * 1000;
 function uploadFile(item) {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
+        item.xhr = xhr;
         const form = new FormData();
         form.append('file', item.file);
         for (const [k, v] of Object.entries(item.metadata || {})) {
@@ -288,7 +370,7 @@ function uploadFile(item) {
                 xhr.abort();
             }
         }, 5000);
-        const settle = (fn) => (...args) => { clearInterval(watchdog); fn(...args); };
+        const settle = (fn) => (...args) => { clearInterval(watchdog); item.xhr = null; fn(...args); };
         const done = settle(resolve);
         const fail = settle(reject);
 
@@ -309,12 +391,14 @@ function uploadFile(item) {
             if (xhr.status === 401) {
                 const err = new Error('Сессия истекла. Войдите снова в новой вкладке и нажмите «Попробовать снова».');
                 err.code = 'AUTH';
+                err.httpStatus = xhr.status;
                 fail(err);
                 return;
             }
             if (xhr.status === 429) {
                 const err = new Error('Сервер занят другими задачами');
                 err.code = 'LIMIT';
+                err.httpStatus = xhr.status;
                 fail(err);
                 return;
             }
@@ -331,7 +415,9 @@ function uploadFile(item) {
                     const j = JSON.parse(xhr.responseText);
                     if (j.detail) msg += `: ${j.detail}`;
                 } catch (_) {}
-                fail(new Error(msg));
+                const error = new Error(msg);
+                error.httpStatus = xhr.status;
+                fail(error);
             }
         };
         xhr.onerror = () => fail(new Error('Нет соединения с сервером. Проверьте интернет.'));
@@ -343,6 +429,8 @@ function uploadFile(item) {
                 : 'Загрузка прервана'
         ));
         xhr.open('POST', `${BACKEND}/upload`);
+        xhr.setRequestHeader('X-Upload-ID', item.jobId);
+        if (item.recordingOwner) xhr.setRequestHeader('X-Recording-Owner', item.recordingOwner);
         xhr.send(form);
     });
 }
@@ -460,28 +548,32 @@ function getJobSteps(item) {
 // A job the server still counts as active holds one of the account's slots.
 // Dropping the card alone would leave it counted, so tell the server too.
 async function cancelQueueItem(item) {
+    if (item.cancelRequested) return;
     if (!confirm(`Прервать обработку «${item.filename}»?\nЗагруженная запись будет удалена.`)) return;
-
+    item.cancelRequested = true;
+    item.status = 'cancelling';
     if (item.pollTimer) clearInterval(item.pollTimer);
     item.pollTimer = null;
-
+    if (item.xhr) item.xhr.abort();
+    renderQueue();
+    // A reservation response may still be in flight. Let it deliver the ID,
+    // but processQueueItem will no longer send audio or start a poller.
+    if (item.uploadSettled) await item.uploadSettled;
     if (item.jobId) {
-        try {
-            const resp = await fetch(`${BACKEND}/jobs/${item.jobId}`, { method: 'DELETE' });
-            // 404 means it is already gone, which is the outcome we wanted.
-            if (!resp.ok && resp.status !== 404) {
-                alert('Не удалось прервать задачу на сервере. Попробуйте ещё раз.');
-                pollQueueItem(item);
-                return;
-            }
-        } catch (err) {
-            alert('Нет связи с сервером. Попробуйте ещё раз, когда интернет восстановится.');
-            pollQueueItem(item);
+        try { await deleteRemoteJob(item.jobId); }
+        catch (error) {
+            item.cancelRequested = false;
+            item.status = 'error';
+            item.retryMode = 'status';
+            item.error = 'Не удалось подтвердить отмену на сервере. Проверьте соединение и повторите отмену.';
+            renderQueue();
             return;
         }
     }
-
-    queue = queue.filter((q) => q.key !== item.key);
+    item.removed = true;
+    if (item.jobId) cancelledJobIds.add(item.jobId);
+    await removeLocalRecording(item);
+    queue = queue.filter(q => q.key !== item.key);
     if (queue.length === 0) showCard('upload-card');
     else renderQueue();
     checkQueueScheduler();
@@ -493,7 +585,7 @@ async function cancelQueueItem(item) {
 function renderQueueItem(item) {
     const isDone = item.status === 'done';
     const isErr = item.status === 'error' || item.status === 'auth_required';
-    const isWorking = item.status === 'uploading' || item.status === 'processing';
+    const isWorking = ['uploading', 'processing', 'cancelling'].includes(item.status);
     const isStaged = item.status === 'staged';
 
     const wrap = document.createElement('div');
@@ -550,6 +642,7 @@ function renderQueueItem(item) {
         const cancelBtn = document.createElement('button');
         cancelBtn.className = 'queue-remove-btn';
         cancelBtn.title = 'Прервать обработку';
+        cancelBtn.disabled = !!item.cancelRequested;
         cancelBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
         cancelBtn.addEventListener('click', () => { cancelQueueItem(item); });
         head.appendChild(cancelBtn);
@@ -559,7 +652,10 @@ function renderQueueItem(item) {
         rmBtn.className = 'queue-remove-btn';
         rmBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
         rmBtn.title = 'Удалить';
-        rmBtn.addEventListener('click', () => {
+        rmBtn.addEventListener('click', async () => {
+            if (item.jobId) { await cancelQueueItem(item); return; }
+            if (item.recordingId && !confirm('Удалить локальную запись? Восстановить её будет невозможно.')) return;
+            await removeLocalRecording(item);
             // A failed job still has a row on the server; drop that too so the
             // card does not come back on the next reload.
             if (item.jobId) {
@@ -570,6 +666,20 @@ function renderQueueItem(item) {
             else renderQueue();
         });
         head.appendChild(rmBtn);
+    }
+    if (item.recordingId && item.file) {
+        const saveAudio = document.createElement('button');
+        saveAudio.className = 'secondary small';
+        saveAudio.textContent = 'Скачать аудио';
+        saveAudio.addEventListener('click', () => {
+            const url = URL.createObjectURL(item.file);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = item.file.name;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        });
+        head.appendChild(saveAudio);
     }
     wrap.appendChild(head);
 
@@ -612,7 +722,7 @@ function renderQueueItem(item) {
         // The model ran out of room. The text is real but may stop mid-hearing.
         const warn = document.createElement('div');
         warn.className = 'queue-error-msg';
-        warn.textContent = 'Модель достигла предела длины ответа — проверьте, ' +
+        warn.textContent = 'Ответ модели получен не полностью — проверьте, ' +
             'что протокол доведён до конца заседания.';
         wrap.appendChild(warn);
     }
@@ -635,15 +745,15 @@ function renderQueueItem(item) {
 
         const retryBtn = document.createElement('button');
         retryBtn.className = 'secondary small';
-        retryBtn.textContent = '↻ Попробовать снова';
-        retryBtn.addEventListener('click', () => {
-            item.status = 'queued';
-            item.error = null;
-            item.jobId = null;
-            item.reconnecting = false;
-            renderQueue();
-            checkQueueScheduler();
-        });
+        const checkExisting = item.jobId && item.retryMode !== 'upload';
+        retryBtn.textContent = checkExisting ? '↻ Проверить статус снова' : '↻ Повторить обработку';
+        retryBtn.disabled = !checkExisting && !item.file;
+        if (retryBtn.disabled) {
+            const hint = document.createElement('span');
+            hint.textContent = 'Выберите исходный аудиофайл для повторной обработки.';
+            actions.appendChild(hint);
+        }
+        retryBtn.addEventListener('click', () => { retryQueueItem(item); });
         actions.appendChild(retryBtn);
         wrap.appendChild(actions);
     }
@@ -858,7 +968,7 @@ async function loadHistoryJobs() {
         const resp = await fetch(`${BACKEND}/jobs`);
         if (!resp.ok) return;
         const data = await resp.json();
-        const allJobs = data.jobs || [];
+        const allJobs = (data.jobs || []).filter(job => !cancelledJobIds.has(job.id));
         
         historyJobs = allJobs.filter((j) => j.status === 'done');
         renderHistory();
@@ -1039,6 +1149,11 @@ async function fetchUserProfile() {
         const resp = await fetch(`${BACKEND}/api/me`);
         if (!resp.ok) return;
         const user = await resp.json();
+        if (recordingStore && user.recording_owner !== recordingStore.owner) {
+            // Chunks already committed remain in the original account's DB.
+            window.location.reload();
+            return;
+        }
 
         const name = user.display_name || user.username || 'Пользователь';
         const initial = name.charAt(0).toUpperCase();
@@ -1121,52 +1236,61 @@ let mediaRecorder = null;
 let audioChunks = [];
 let recordingInterval = null;
 let recordingStartTime = 0;
-let db = null;
+let recordingStore = null;
 let isRecording = false;
+let startingRecording = false;
 
-// Initialize IndexedDB
-const requestDB = indexedDB.open('DictaphoneDB', 1);
-requestDB.onupgradeneeded = (e) => {
-    db = e.target.result;
-    if (!db.objectStoreNames.contains('chunks')) {
-        db.createObjectStore('chunks', { autoIncrement: true });
+async function requireRecordingOwner(owner) {
+    const response = await fetch(`${BACKEND}/api/me`);
+    const profile = response.ok ? await response.json() : null;
+    if (!profile || profile.recording_owner !== owner) {
+        const error = new Error('Войдите в аккаунт, в котором сделана запись. Локальная копия сохранена.');
+        error.code = 'AUTH';
+        throw error;
     }
-};
-requestDB.onsuccess = (e) => {
-    db = e.target.result;
-    checkOrphanedRecording();
-};
-requestDB.onerror = (e) => console.warn('IndexedDB error:', e);
-
-function clearChunksDB() {
-    if (!db) return;
-    const tx = db.transaction('chunks', 'readwrite');
-    tx.objectStore('chunks').clear();
 }
 
-function saveChunkToDB(blob) {
-    if (!db) return;
-    const tx = db.transaction('chunks', 'readwrite');
-    tx.objectStore('chunks').add(blob);
+async function removeLocalRecording(item) {
+    if (!item.recordingId || !recordingStore) return;
+    try {
+        await recordingStore.remove(item.recordingId);
+        item.recordingId = null;
+    } catch (error) {
+        console.error('Local recording retained because removal failed', error);
+    }
 }
 
-function checkOrphanedRecording() {
-    if (!db) return;
-    const tx = db.transaction('chunks', 'readonly');
-    const store = tx.objectStore('chunks');
-    const getReq = store.getAll();
-    getReq.onsuccess = () => {
-        if (getReq.result && getReq.result.length > 0) {
-            console.log('Found orphaned recording chunks, recovering...');
-            const firstType = getReq.result[0].type || 'audio/webm';
-            const ext = firstType.includes('mp4') ? 'mp4' : 'webm';
-            const recoveredBlob = new Blob(getReq.result, { type: firstType });
-            const recoveredFile = new File([recoveredBlob], `Восстановленная_запись_${new Date().toISOString().slice(0,10)}.${ext}`, { type: firstType });
-            addFilesToQueue([recoveredFile]);
-            setTimeout(clearChunksDB, 100);
+async function initRecordings() {
+    const response = await fetch(`${BACKEND}/api/me`);
+    if (!response.ok) throw new Error('Войдите в аккаунт для записи.');
+    const profile = await response.json();
+    recordingStore = await RecordingStore.open(profile.recording_owner);
+    for (const record of await recordingStore.recover()) {
+        const [item] = addFilesToQueue([record.file], { id: record.id, owner: recordingStore.owner });
+        if (record.jobId) {
+            // Keep the audio until a completed draft is confirmed. A reload
+            // resumes the original job without uploading the recording again.
+            const existing = queue.find(q => q !== item && q.jobId === record.jobId);
+            if (existing) {
+                Object.assign(existing, { file: item.file, recordingId: item.recordingId, recordingOwner: item.recordingOwner });
+                queue = queue.filter(q => q !== item);
+            } else {
+                item.jobId = record.jobId;
+                item.status = 'processing';
+                pollQueueItem(item);
+                item.forceCheck();
+            }
         }
-    };
+    }
+    renderQueue();
 }
+
+// Old DictaphoneDB chunks have no owner. Never assign them to whoever logs in
+// next and never erase them automatically; see the migration note in README.
+const recordingsReady = initRecordings().catch(error => {
+    console.error('Recording storage unavailable', error);
+    return false;
+});
 
 function updateRecordingTimer() {
     const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
@@ -1179,58 +1303,78 @@ function updateRecordingTimer() {
 }
 
 async function startRecording() {
+    if (startingRecording || isRecording) return;
+    startingRecording = true;
+    let stream = null;
+    let record = null;
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
+        if (await recordingsReady === false || !recordingStore) {
+            throw new Error('Не удалось открыть хранилище записи. Проверьте доступное место и разрешения браузера.');
+        }
+        await requireRecordingOwner(recordingStore.owner);
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        mediaRecorder = recorder;
         audioChunks = [];
-        clearChunksDB();
+        const filename = `Запись_${new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-')}`;
+        record = await recordingStore.create(filename);
+        const store = recordingStore;
+        let sequence = 0;
+        let writes = Promise.resolve();
+        let saveError = null;
 
-        mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-                audioChunks.push(e.data);
-                saveChunkToDB(e.data);
-            }
+        recorder.ondataavailable = (e) => {
+            if (!e.data.size) return;
+            audioChunks.push(e.data);
+            const number = sequence++;
+            writes = writes.then(() => store.append(record.id, number, e.data)).catch(error => {
+                if (!saveError) {
+                    saveError = error;
+                    if (recorder.state !== 'inactive') recorder.stop();
+                    alert('Не удалось сохранить запись на устройстве. Запись остановлена. Скачайте аудио из очереди, прежде чем закрывать страницу.');
+                }
+            });
         };
 
-        mediaRecorder.onstop = () => {
+        recorder.onstop = async () => {
             clearInterval(recordingInterval);
+            stream.getTracks().forEach(track => track.stop());
+            // The final dataavailable precedes onstop; await its transaction.
+            await writes;
             isRecording = false;
-            releaseWakeLock();
-            stream.getTracks().forEach(t => t.stop());
-            
+            releaseWakeLockIfDone();
             const defActions = $('default-actions');
             const recUI = $('recording-ui');
             if (defActions) defActions.hidden = false;
             if (recUI) recUI.hidden = true;
-            
             const timerEl = $('recording-timer');
             if (timerEl) timerEl.textContent = '00:00:00';
-
-            const mime = mediaRecorder.mimeType || 'audio/webm';
+            const mime = recorder.mimeType || 'audio/webm';
             const ext = mime.includes('mp4') ? 'mp4' : 'webm';
-            const audioBlob = new Blob(audioChunks, { type: mime });
-            const dateStr = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
-            const file = new File([audioBlob], `Запись_${dateStr}.${ext}`, { type: mime });
-            addFilesToQueue([file]);
-            setTimeout(clearChunksDB, 100);
+            const file = new File(audioChunks, `${filename}.${ext}`, { type: mime });
+            addFilesToQueue([file], { id: record.id, owner: store.owner });
+            audioChunks = [];
         };
-
-        mediaRecorder.start(1000); // chunk every 1 second
+        recorder.onerror = () => {
+            alert('Ошибка микрофона. Сохранённые фрагменты записи останутся на устройстве.');
+            if (recorder.state !== 'inactive') recorder.stop();
+        };
+        recorder.start(1000);
         isRecording = true;
         recordingStartTime = Date.now();
         updateRecordingTimer();
         recordingInterval = setInterval(updateRecordingTimer, 1000);
-        
         acquireWakeLock();
-        
         const defActions = $('default-actions');
         const recUI = $('recording-ui');
         if (defActions) defActions.hidden = true;
         if (recUI) recUI.hidden = false;
-        
-    } catch (err) {
-        alert('Не удалось получить доступ к микрофону. Разрешите доступ в настройках браузера.');
-        console.error('Microphone error:', err);
+    } catch (error) {
+        if (stream) stream.getTracks().forEach(track => track.stop());
+        if (record) recordingStore.release(record.id);
+        alert(error.message || 'Не удалось начать запись. Проверьте разрешения микрофона.');
+    } finally {
+        startingRecording = false;
     }
 }
 

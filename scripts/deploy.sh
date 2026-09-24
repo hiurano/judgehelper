@@ -120,8 +120,8 @@ reload_caddy() {
     # it. Without this a proxy change deploys to disk and nowhere else, while
     # the rollout reports success because the backend answers fine.
     if [ -z "$(docker compose ps --quiet caddy 2>/dev/null)" ]; then
-        echo "Caddy is not running; it will pick the config up when it starts."
-        return 0
+        echo "Caddy is not running; the public site is unavailable." >&2
+        return 1
     fi
     echo "Reloading the Caddy configuration..."
     if docker compose exec -T caddy \
@@ -143,6 +143,22 @@ wait_for_ready() {
         fi
         sleep 2
     done
+    return 1
+}
+
+wait_for_public_ready() {
+    local attempt public_url
+    public_url="$(read_env BASE_URL '')"
+    public_url="${public_url%/}/ready"
+    for attempt in $(seq 1 6); do
+        if docker compose exec -T judgehelper python -c \
+            "import json,sys,urllib.request; r=urllib.request.urlopen(sys.argv[1], timeout=5); sys.exit(0 if r.status == 200 and json.load(r).get('ready') is True else 1)" \
+            "$public_url" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    echo "Public HTTPS readiness check failed: $public_url" >&2
     return 1
 }
 
@@ -182,7 +198,10 @@ docker compose build --pull
 # compose exits non-zero when a dependency never turns healthy. Under set -e
 # that would abort the script before it can diagnose or roll back, so keep
 # going and let the readiness check below decide.
-docker compose up -d --remove-orphans || true
+compose_started=1
+if ! docker compose up -d --remove-orphans; then
+    compose_started=0
+fi
 
 echo "Waiting for the backend readiness check..."
 if wait_for_ready; then
@@ -194,9 +213,10 @@ if wait_for_ready; then
         echo "Deployment failed: the system prompt mount could not be refreshed." >&2
         exit 1
     fi
-    if ! reload_caddy; then
+    if [ "$compose_started" != "1" ] || ! reload_caddy || ! wait_for_public_ready; then
         docker compose ps
-        echo "Deployment failed: the application is live but Caddy kept its old configuration." >&2
+        docker compose logs --tail=50 caddy >&2
+        echo "Deployment failed: the backend is ready but the proxy/public endpoint was not verified." >&2
         exit 1
     fi
     docker compose ps
@@ -216,8 +236,7 @@ echo "Rolling back to the previous image..." >&2
 docker tag "$rollback_image" "$app_image"
 docker compose up -d --force-recreate --no-build >&2 || true
 
-if wait_for_ready; then
-    reload_caddy || true
+if wait_for_ready && reload_caddy && wait_for_public_ready; then
     docker compose ps
     echo "Rolled back to the previous image. The new build was NOT deployed." >&2
     exit 1

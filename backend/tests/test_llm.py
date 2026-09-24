@@ -194,3 +194,29 @@ def test_chunk_structure_survives_continuation_and_fallback(two_model_chain, mon
         assert system["content"].endswith(instruction)
         assert "Не повторяй шапку" in system["content"]
         assert "Не добавляй заключительный шаблон" in system["content"]
+
+
+@pytest.mark.parametrize('fallback', [False, True])
+def test_continuation_exception_preserves_partial_or_uses_complete_fallback(monkeypatch, fallback):
+    import httpx
+    monkeypatch.setattr(llm, 'LLM_FALLBACK_CHAIN', ['first', 'second'] if fallback else ['first'])
+    async def no_delays(operation, **kwargs):
+        return await operation()
+    monkeypatch.setattr(llm, 'async_retry', no_delays)
+
+    class Client:
+        calls = 0
+        async def post(self, url, **kwargs):
+            self.calls += 1
+            if self.calls == 2:
+                raise httpx.ReadTimeout('continuation failed')
+            return _FakeResponse(_completion(
+                'complete' if self.calls == 3 else 'saved partial',
+                'stop' if self.calls == 3 else 'length',
+                prompt_tokens=10, completion_tokens=20,
+            ))
+
+    result = asyncio.run(llm.call_llm_with_fallback(Client(), 'transcript', 'job'))
+    assert result.text == ('complete' if fallback else 'saved partial')
+    assert result.truncated is not fallback
+    assert result.usage == {'prompt_tokens': 10, 'completion_tokens': 20}

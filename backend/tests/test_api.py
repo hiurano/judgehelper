@@ -532,3 +532,83 @@ def test_prune_orphan_uploads_tolerates_a_missing_directory(tmp_path, monkeypatc
 
     monkeypatch.setattr(main_mod, "UPLOAD_DIR", tmp_path / "never-created")
     assert main_mod.prune_orphan_uploads() == 0
+
+
+def test_recreated_account_rejects_previous_cookie(tmp_path, monkeypatch):
+    from backend import auth
+    from backend.db import UserStore
+
+    users = UserStore(str(tmp_path / 'users.db'))
+    monkeypatch.setattr(auth, 'user_store', users)
+    users.create_user('alice', 'first-password')
+    original_owner = users.get_account_id('alice')
+    token = auth.make_session_token('alice')
+    assert auth.verify_session_token(token) == 'alice'
+    users.delete_user('alice')
+    users.create_user('alice', 'second-password')
+    assert users.get_account_id('alice') != original_owner
+    assert auth.verify_session_token(token) is None
+    assert auth.verify_session_token(auth.make_session_token('alice')) == 'alice'
+
+
+def test_old_cookie_format_is_revoked_after_account_id_migration(tmp_path, monkeypatch):
+    import base64
+    import hashlib
+    import hmac
+    import time
+    from backend import auth
+    from backend.db import UserStore
+
+    users = UserStore(str(tmp_path / 'users.db'))
+    users.create_user('alice', 'password')
+    monkeypatch.setattr(auth, 'user_store', users)
+    payload = f'alice|1|{int(time.time()) + 3600}'
+    signature = hmac.new(auth._session_secret().encode(), payload.encode(), hashlib.sha256).hexdigest()
+    old_cookie = base64.urlsafe_b64encode(f'{payload}|{signature}'.encode()).decode().rstrip('=')
+    assert auth.verify_session_token(old_cookie) is None
+
+
+def test_parallel_login_reserves_attempts_before_password_work(monkeypatch):
+    import asyncio
+    from backend import auth
+    auth._login_attempts.clear()
+
+    async def run():
+        release = asyncio.Event()
+        calls = []
+        async def delayed_verify(func, *args):
+            calls.append(args)
+            await release.wait()
+            return False
+        monkeypatch.setattr(auth.asyncio, 'to_thread', delayed_verify)
+        tasks = [asyncio.create_task(auth.login_submit_handler('parallel-user', 'bad')) for _ in range(12)]
+        await asyncio.sleep(0)
+        assert len(calls) == auth.LOGIN_MAX_FAILURES
+        release.set()
+        responses = await asyncio.gather(*tasks)
+        assert sum(r.status_code == 429 for r in responses) == 12 - auth.LOGIN_MAX_FAILURES
+    asyncio.run(run())
+    auth._login_attempts.clear()
+
+
+def test_successful_login_does_not_erase_other_reserved_attempts(monkeypatch):
+    import asyncio
+    from backend import auth
+    auth._login_attempts.clear()
+    user_store.create_user('success-user', 'a-password')
+    async def run():
+        release = asyncio.Event()
+        async def delayed_verify(func, username, password):
+            if password == 'good':
+                return True
+            await release.wait()
+            return False
+        monkeypatch.setattr(auth.asyncio, 'to_thread', delayed_verify)
+        failures = [asyncio.create_task(auth.login_submit_handler('success-user', 'bad')) for _ in range(4)]
+        await asyncio.sleep(0)
+        assert (await auth.login_submit_handler('success-user', 'good')).status_code == 303
+        assert len(auth._login_attempts['user:success-user|<unknown>']) == 4
+        release.set()
+        await asyncio.gather(*failures)
+    asyncio.run(run())
+    auth._login_attempts.clear()

@@ -140,6 +140,27 @@ class JobStore:
                             (seconds, job_id),
                         )
 
+            # Also repair databases already opened by the old migration,
+            # which added these columns without copying their JSON values.
+            for job_id, data_str in conn.execute(
+                "SELECT id, data FROM jobs WHERE status IS NULL OR "
+                "(aai_transcript_id IS NULL AND data LIKE '%aai_transcript_id%')"
+            ).fetchall():
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                status = data.get("status")
+                transcript_id = data.get("aai_transcript_id")
+                conn.execute(
+                    "UPDATE jobs SET status = COALESCE(status, ?), "
+                    "aai_transcript_id = COALESCE(aai_transcript_id, ?) WHERE id = ?",
+                    (status if isinstance(status, str) else None,
+                     transcript_id if isinstance(transcript_id, str) else None, job_id),
+                )
+
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
@@ -266,6 +287,21 @@ class JobStore:
         with self._lock, self._conn() as conn:
             cur = conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
             return cur.rowcount > 0
+
+    def claim_upload(self, job_id: str, user_id: str) -> bool:
+        """Consume a reservation once; deletion always wins over a late upload."""
+        with self._lock, self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT data FROM jobs WHERE id = ? AND user_id = ?", (job_id, user_id)).fetchone()
+            if not row:
+                return False
+            data = json.loads(row[0])
+            if data.get("status") != "processing" or data.get("phase") != "awaiting_upload":
+                return False
+            data["phase"] = "receiving_upload"
+            conn.execute("UPDATE jobs SET data = ?, updated_at = ? WHERE id = ?",
+                         (json.dumps(data, ensure_ascii=False), int(time.time()), job_id))
+            return True
 
     def count_for_user(self, user_id: str) -> int:
         with self._conn() as conn:
@@ -451,6 +487,29 @@ class UserStore:
                     "ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1"
                 )
 
+            # A username can be reused after deletion; its identity cannot.
+            # Existing accounts get an ID once. Pre-migration cookies have no
+            # ID and are intentionally revoked by the new token verifier.
+            if "account_id" not in cols:
+                conn.execute("ALTER TABLE users ADD COLUMN account_id TEXT")
+            for (username,) in conn.execute(
+                "SELECT username FROM users WHERE account_id IS NULL"
+            ).fetchall():
+                conn.execute(
+                    "UPDATE users SET account_id = ? WHERE username = ?",
+                    (secrets.token_hex(16), username),
+                )
+
+    def get_account_id(self, username: str) -> Optional[str]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT account_id FROM users WHERE username = ?", (username,)).fetchone()
+        return row[0] if row else None
+
+    def get_session_identity(self, username: str) -> Optional[str]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT account_id, session_version FROM users WHERE username = ?", (username,)).fetchone()
+        return f"{row[0]}:{row[1]}" if row and row[0] else None
+
     @contextmanager
     def _conn(self):
         conn = sqlite3.connect(str(self.path), timeout=10.0)
@@ -470,8 +529,8 @@ class UserStore:
         try:
             with self._lock, self._conn() as conn:
                 conn.execute(
-                    "INSERT INTO users (username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
-                    (username, pw_hash, display_name or username.capitalize(), int(time.time())),
+                    "INSERT INTO users (username, password_hash, display_name, created_at, account_id) VALUES (?, ?, ?, ?, ?)",
+                    (username, pw_hash, display_name or username.capitalize(), int(time.time()), secrets.token_hex(16)),
                 )
             return True
         except sqlite3.IntegrityError:

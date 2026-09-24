@@ -87,11 +87,11 @@ def _session_secret() -> str:
 
 
 def make_session_token(username: str) -> str:
-    session_version = user_store.get_session_version(username)
-    if session_version is None:
+    session_identity = user_store.get_session_identity(username)
+    if session_identity is None:
         raise ValueError("Cannot create a session for an unknown user")
     expiry = int(time.time()) + SESSION_DURATION
-    payload = f"{username}|{session_version}|{expiry}"
+    payload = f"{username}|{session_identity}|{expiry}"
     sig = hmac.new(_session_secret().encode(), payload.encode(), hashlib.sha256).hexdigest()
     raw = f"{payload}|{sig}".encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
@@ -103,18 +103,18 @@ def verify_session_token(token: Optional[str]) -> Optional[str]:
     try:
         padded = token + "=" * (-len(token) % 4)
         decoded = base64.urlsafe_b64decode(padded.encode()).decode("utf-8")
-        username, version_str, expiry_str, sig = decoded.rsplit("|", 3)
+        username, identity, expiry_str, sig = decoded.rsplit("|", 3)
         if int(expiry_str) < int(time.time()):
             return None
         expected = hmac.new(
             _session_secret().encode(),
-            f"{username}|{version_str}|{expiry_str}".encode(),
+            f"{username}|{identity}|{expiry_str}".encode(),
             hashlib.sha256,
         ).hexdigest()
         if not hmac.compare_digest(sig, expected):
             return None
-        current_version = user_store.get_session_version(username)
-        if current_version is None or int(version_str) != current_version:
+        current_identity = user_store.get_session_identity(username)
+        if current_identity is None or identity != current_identity:
             return None
         return username
     except Exception:
@@ -231,7 +231,13 @@ async def login_submit_handler(
                     _login_attempts.pop(key, None)
         user_failures = len(_recent_failures(user_key, now))
         ip_failures = len(_recent_failures(ip_key, now))
-    if user_failures >= LOGIN_MAX_FAILURES or ip_failures >= LOGIN_MAX_FAILURES_PER_IP:
+        limited = user_failures >= LOGIN_MAX_FAILURES or ip_failures >= LOGIN_MAX_FAILURES_PER_IP
+        if not limited:
+            # Reserve before yielding to password verification. In-flight
+            # attempts count too, including ones whose caller disconnects.
+            _login_attempts.setdefault(user_key, []).append(now)
+            _login_attempts.setdefault(ip_key, []).append(now)
+    if limited:
         log.warning(
             "Login rate limit reached: username=%r address=%s (%s for this pair, %s from this address)",
             clean_user, address, user_failures, ip_failures,
@@ -244,16 +250,18 @@ async def login_submit_handler(
 
     valid = await asyncio.to_thread(verify_user_credentials, clean_user, password)
     if not valid:
-        with _login_attempts_lock:
-            _login_attempts.setdefault(user_key, []).append(now)
-            _login_attempts.setdefault(ip_key, []).append(now)
         log.warning(f"Failed login: username={clean_user!r} address={address}")
         return _login_page(error="Неверное имя пользователя или пароль")
 
     with _login_attempts_lock:
-        # Only this pair is forgiven: the address keeps its tally, so a
-        # successful login cannot be used to reset a spray in progress.
-        _login_attempts.pop(user_key, None)
+        # Release only this successful attempt, preserving other failures and
+        # reservations made concurrently for the same pair/address.
+        for key in (user_key, ip_key):
+            entries = _login_attempts.get(key, [])
+            if now in entries:
+                entries.remove(now)
+            if not entries:
+                _login_attempts.pop(key, None)
 
     token = make_session_token(clean_user)
     resp = RedirectResponse(url="/", status_code=303)

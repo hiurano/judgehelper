@@ -38,3 +38,13 @@ async def cancel_all() -> None:
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
     _tasks.clear()
+
+
+async def cancel_job(job_id: str) -> None:
+    """Stop local submission/drafting after the owner deletes its job row."""
+    names = {f'{kind}:{job_id}' for kind in ('aai-submit', 'process', 'recover')}
+    pending = [task for task in _tasks if task.get_name() in names and not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)

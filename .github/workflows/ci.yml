@@ -71,9 +71,23 @@ jobs:
         run: |
           pytest -v
 
+  browser-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install browser test dependencies
+        run: |
+          pip install -r requirements-browser.txt
+          python -m playwright install --with-deps chromium
+      - name: Test recording persistence and account isolation
+        run: pytest browser_tests -v
+
   deploy:
     # Only once the suite is green, and never from a pull request.
-    needs: test
+    needs: [test, browser-test]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Never let two deploys overlap. Queue rather than cancel, so a rollout

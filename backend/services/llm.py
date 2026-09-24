@@ -111,13 +111,13 @@ async def call_llm_with_fallback(
     # away: hours of hearing and every token spent on it are in here.
     best_partial: Optional[Draft] = None
     for model in LLM_FALLBACK_CHAIN:
+        full_draft = ""
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0}
         try:
             messages = [
                 {"role": "system", "content": get_system_prompt() + ("\n\n" + structure_instruction if structure_instruction else "")},
                 {"role": "user", "content": user_msg},
             ]
-            full_draft = ""
-            total_usage = {"prompt_tokens": 0, "completion_tokens": 0}
             is_completed = False
             # Kept apart from last_error: the generic "gave up" message below
             # must not overwrite what the provider actually said went wrong.
@@ -188,14 +188,17 @@ async def call_llm_with_fallback(
             last_error = model_error or (
                 f"{model}: Failed to complete draft within iteration limits."
             )
-            if full_draft and (best_partial is None or len(full_draft) > len(best_partial.text)):
-                best_partial = Draft(full_draft, model, total_usage, truncated=True)
             continue
 
         except Exception as e:
             last_error = f"{model}: {e}"
             log.warning(f"[{log_prefix}] {last_error}; trying next model")
             continue
+        finally:
+            # A timeout or malformed continuation must not discard text from
+            # previous successful calls. A later complete model still wins.
+            if full_draft and (best_partial is None or len(full_draft) > len(best_partial.text)):
+                best_partial = Draft(full_draft, model, total_usage, truncated=True)
 
     if best_partial is not None:
         log.warning(

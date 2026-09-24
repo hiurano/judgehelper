@@ -6,6 +6,7 @@ Imports modular services for configuration, database, authentication,
 transcription (AssemblyAI), LLM drafting (OpenRouter), and DOCX generation.
 """
 import asyncio
+import errno
 from contextlib import asynccontextmanager
 from pathlib import Path
 import secrets
@@ -15,10 +16,13 @@ import urllib.parse
 import uuid
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Form, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.formparsers import MultiPartException
+
+from backend.services.uploads import MediaUploadParser
 
 from backend.auth import (
     login_page_handler,
@@ -48,7 +52,7 @@ from backend.services.docx_generator import render_docx
 from backend.services.http_client import close_shared_client
 from backend.services.pipeline import process_transcript, recover_pending_jobs
 from backend.services.transcription import aai_polling_loop, submit_to_assemblyai
-from backend.services.task_manager import cancel_all, spawn
+from backend.services.task_manager import cancel_all, cancel_job, spawn
 
 
 def _looks_like_supported_media(header: bytes) -> bool:
@@ -301,123 +305,118 @@ async def ready():
 
 
 # --- API Endpoints ------------------------------------------------------
-@app.post("/upload")
-async def upload(
-    request: Request,
-    file: UploadFile = File(...),
-    defendant: str = Form(""),
-):
-    allowed_exts = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma", ".webm", ".opus", ".mp4"}
-    filename = file.filename or ""
-    if len(filename) > 255:
-        raise HTTPException(400, "Имя файла слишком длинное")
-    if len(defendant) > 300:
-        raise HTTPException(400, "Поле с данными подсудимого слишком длинное")
-    ext = Path(filename).suffix.lower()
-    if not ext or ext not in allowed_exts:
-        raise HTTPException(
-            400,
-            f"Неподдерживаемый формат файла ({ext or 'нет расширения'}). "
-            "Разрешены аудиофайлы: MP3, WAV, M4A, OGG, FLAC, AAC, WMA, WEBM.",
-        )
+def reserve_upload(user_id: str, phase: str) -> tuple[str, dict]:
+    job_id = "job-" + uuid.uuid4().hex[:24]
+    initial_job = {
+        "status": "processing", "phase": phase,
+        "created_at": int(time.time()), "user_id": user_id,
+    }
+    if not jobs.create_if_under_active_limit(job_id, initial_job, MAX_ACTIVE_JOBS_PER_USER):
+        raise HTTPException(429, f"Достигнут лимит активных задач ({MAX_ACTIVE_JOBS_PER_USER}). Дождитесь завершения обработки.")
+    return job_id, initial_job
 
-    # Pre-check Content-Length to reject oversized uploads before reading
+
+@app.post("/uploads")
+async def create_upload(request: Request):
+    """Give the browser a cancellable job ID before it sends any audio."""
+    job_id, _ = reserve_upload(current_user(request), "awaiting_upload")
+    return {"job_id": job_id}
+
+
+@app.post("/upload")
+async def upload(request: Request):
+    # No File/Form parameters here: those consume the body before the handler.
     content_length = request.headers.get("content-length")
-    if content_length:
+    declared_size = 0
+    if content_length is not None:
         try:
-            if int(content_length) > MAX_UPLOAD_BYTES + 1024 * 1024:
-                raise HTTPException(413, _too_large_message())
+            declared_size = int(content_length)
+            if declared_size < 0:
+                raise ValueError
         except ValueError:
             raise HTTPException(400, "Некорректный Content-Length")
-
+        if declared_size > MAX_UPLOAD_BYTES + 1024 * 1024:
+            raise HTTPException(413, _too_large_message())
+    if not request.headers.get("content-type", "").lower().startswith("multipart/form-data"):
+        raise HTTPException(400, "Ожидается multipart/form-data")
     if not ASSEMBLYAI_KEY:
         raise HTTPException(500, "AssemblyAI key not configured on server")
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    # Refuse now if the declared size clearly will not fit, rather than filling
-    # the volume first and failing on the last chunk.
     free = _free_disk_bytes()
-    if free is not None and content_length:
-        try:
-            if free - int(content_length) < DISK_RESERVE_BYTES:
-                raise HTTPException(507, OUT_OF_SPACE_MESSAGE)
-        except ValueError:
-            pass
+    if free is not None and free - declared_size < DISK_RESERVE_BYTES:
+        raise HTTPException(507, OUT_OF_SPACE_MESSAGE)
 
     user_id = current_user(request)
-    job_id = "job-" + uuid.uuid4().hex[:24]
-    metadata = {"defendant": defendant.strip()}
-    initial_job = {
-        "status": "processing",
-        "phase": "receiving_upload",
-        "metadata": metadata,
-        "filename": filename,
-        "created_at": int(time.time()),
-        "user_id": user_id,
-    }
-    if not jobs.create_if_under_active_limit(
-        job_id, initial_job, MAX_ACTIVE_JOBS_PER_USER
-    ):
-        raise HTTPException(
-            429,
-            f"Достигнут лимит активных задач ({MAX_ACTIVE_JOBS_PER_USER}). Дождитесь завершения обработки.",
-        )
+    recording_owner = request.headers.get("x-recording-owner")
+    if recording_owner and recording_owner != user_store.get_account_id(user_id):
+        raise HTTPException(403, "Войдите в аккаунт, в котором сделана запись")
+    job_id = request.headers.get("x-upload-id")
+    if job_id:
+        if not jobs.claim_upload(job_id, user_id):
+            raise HTTPException(404, "Загрузка отменена или уже начата")
+        initial_job = jobs.get(job_id)
+        if not initial_job:
+            raise HTTPException(404, "Загрузка отменена")
+    else:
+        # Preserve compatibility for API clients sending a single POST.
+        job_id, initial_job = reserve_upload(user_id, "receiving_upload")
 
-    file_path = UPLOAD_DIR / f"{job_id}{ext}"
+    file_path = UPLOAD_DIR / f"{job_id}.upload"
 
-    # Stream the uploaded file directly to disk to avoid RAM OOM
-    size_bytes = 0
-    header = b""
+    async def bounded_stream():
+        received = 0
+        async for chunk in request.stream():
+            received += len(chunk)
+            if received > MAX_UPLOAD_BYTES + 1024 * 1024:
+                raise HTTPException(413, _too_large_message())
+            # Bound each parser/write step, including when an ASGI server gives
+            # us a large chunk. Check the actual volume before every write.
+            for offset in range(0, len(chunk), 1024 * 1024):
+                if not jobs.get(job_id):
+                    raise HTTPException(404, "Загрузка отменена")
+                piece = chunk[offset:offset + 1024 * 1024]
+                remaining = await asyncio.to_thread(_free_disk_bytes)
+                if remaining is not None and remaining - len(piece) < DISK_RESERVE_BYTES:
+                    raise HTTPException(507, OUT_OF_SPACE_MESSAGE)
+                yield piece
+
+    def validate_filename(filename):
+        if len(filename) > 255:
+            raise HTTPException(400, "Имя файла слишком длинное")
+        ext = Path(filename).suffix.lower()
+        allowed_exts = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma", ".webm", ".opus", ".mp4"}
+        if ext not in allowed_exts:
+            raise HTTPException(400, f"Неподдерживаемый формат файла ({ext or 'нет расширения'})")
+
     try:
-        checked_at = 0
-        with open(file_path, "wb") as f:
-            while chunk := await file.read(1024 * 1024):  # 1 MB chunks
-                if not header:
-                    # Judge the format from the first chunk: a file that is not
-                    # audio should be refused now, not after it has all landed.
-                    header = chunk[:16]
-                    if not _looks_like_supported_media(header):
-                        raise HTTPException(
-                            400,
-                            "Содержимое файла не соответствует поддерживаемому аудио/видео формату",
-                        )
-                await asyncio.to_thread(f.write, chunk)
-                size_bytes += len(chunk)
-                if size_bytes > MAX_UPLOAD_BYTES:
-                    raise HTTPException(413, _too_large_message())
-                # Content-Length can be absent or wrong, so keep watching the
-                # volume as the bytes land. Every 64 MB is often enough to stop
-                # well before the reserve is gone.
-                if size_bytes - checked_at >= 64 * 1024 * 1024:
-                    checked_at = size_bytes
-                    remaining = await asyncio.to_thread(_free_disk_bytes)
-                    if remaining is not None and remaining < DISK_RESERVE_BYTES:
-                        raise HTTPException(507, OUT_OF_SPACE_MESSAGE)
-
-        if size_bytes == 0:
-            raise HTTPException(400, "Загруженный файл пуст")
-    except BaseException:
+        parser = MediaUploadParser(
+            request.headers, bounded_stream(), path=file_path,
+            max_bytes=MAX_UPLOAD_BYTES, validate_header=_looks_like_supported_media,
+            validate_filename=validate_filename,
+        )
+        form = await parser.receive()
+        file = form.get("file")
+        filename = getattr(file, "filename", "") or ""
+        defendant = form.get("defendant", "")
+        if not isinstance(defendant, str) or len(defendant) > 300:
+            raise HTTPException(400, "Поле с данными подсудимого слишком длинное")
+        initial_job.update({
+            "phase": "uploading_to_aai", "metadata": {"defendant": defendant.strip()},
+            "filename": filename, "size_mb": round(parser.file_bytes / 1024 / 1024, 1),
+        })
+        if not jobs.update_if_exists(job_id, initial_job):
+            raise HTTPException(404, "Задача была удалена во время загрузки")
+    except BaseException as exc:
         file_path.unlink(missing_ok=True)
         jobs.delete(job_id)
+        if isinstance(exc, MultiPartException):
+            raise HTTPException(400, exc.message) from exc
+        if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+            raise HTTPException(507, OUT_OF_SPACE_MESSAGE) from exc
         raise
 
-    size_mb = size_bytes / 1024 / 1024
-        
-    log.info("Received media file (%s MB) for user %s", f"{size_mb:.1f}", user_id)
-
-    initial_job.update({
-        "phase": "uploading_to_aai",
-        "size_mb": round(size_mb, 1),
-    })
-    if not jobs.update_if_exists(job_id, initial_job):
-        # Cancelled from another tab while the bytes were still arriving.
-        file_path.unlink(missing_ok=True)
-        raise HTTPException(404, "Задача была удалена во время загрузки")
-
-    spawn(
-        submit_to_assemblyai(job_id, file_path, filename or "audio"),
-        name=f"aai-submit:{job_id}",
-    )
+    spawn(submit_to_assemblyai(job_id, file_path, filename), name=f"aai-submit:{job_id}")
     return {"job_id": job_id}
 
 
@@ -521,6 +520,7 @@ async def delete_job(job_id: str, request: Request):
     success = jobs.delete(job_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete job")
+    await cancel_job(job_id)
     return {"ok": True}
 
 
@@ -531,6 +531,7 @@ async def get_me(request: Request):
     display_name = user_store.get_display_name(user_id) or user_id.capitalize()
     return {
         "username": user_id,
+        "recording_owner": user_store.get_account_id(user_id),
         "display_name": display_name,
         "plan": "Персональный",
         "total_protocols": stats["total_protocols"],
