@@ -8,15 +8,15 @@
 - Сервер: `serv` (`82.40.57.223`), SSH: `ssh serv`
 - Tailscale: `serv.taile2b2a7.ts.net`
 - Пользователь deployment: `deploy`
-- Код: `/srv/judge-helper` (полноценный read-only deploy-key Git checkout)
-- Конфигурация: `/etc/judge-helper`
-- Данные: `/var/lib/judge-helper`
-- Логи: `/var/log/judge-helper`
-- Резервные копии: `/var/backups/judge-helper`
-- Системный пользователь приложения: `judge-helper` без shell/login
-- GitHub: `https://github.com/hiurano/judge-helper`, ветка `main`
+- Код: `/srv/judgehelper` (полноценный read-only deploy-key Git checkout)
+- Конфигурация: `/etc/judgehelper`
+- Данные: `/var/lib/judgehelper`
+- Логи: `/var/log/judgehelper`
+- Резервные копии: `/var/backups/judgehelper`
+- Системный пользователь приложения: `judgehelper` без shell/login
+- GitHub: `https://github.com/hiurano/judgehelper`, ветка `main`
 - Production следует за `origin/main`; точный commit проверяется командой
-  `git -C /srv/judge-helper rev-parse HEAD`.
+  `git -C /srv/judgehelper rev-parse HEAD`.
 - Production backend и Caddy запущены; `/health` и `/ready` возвращают HTTP 200.
 - TLS-сертификат для production URL валиден.
 - В базе на момент обновления сохранены две существующие задачи.
@@ -62,7 +62,7 @@
 - `deploy.sh` работает и на NixOS без глобального Python через одноразовый Python-контейнер.
 - Перед deployment создаётся согласованная SQLite-копия.
 - Ежедневные SQLite backup выполняются hardened systemd timer от пользователя
-  `judge-helper`, хранятся в `/var/backups/judge-helper` и ротируются через 30 дней.
+  `judgehelper`, хранятся в `/var/backups/judgehelper` и ротируются через 30 дней.
 - Preflight проверяет секреты, домен, права `.env`, UID/GID каталогов и runtime-файлов.
 - Добавлены Dependabot и dependency audit в CI.
 - Удалён устаревший workflow, пинговавший старый Render deployment.
@@ -79,11 +79,11 @@
 ## Резервные копии последнего deployment
 
 Актуальные ежедневные и pre-deploy копии хранятся в
-`/var/backups/judge-helper/`. Также сохранены миграционные копии:
+`/var/backups/judgehelper/`. Также сохранены миграционные копии:
 
-- `/home/deploy/judge-helper/backend/data/backups/predeploy-20260917T221454Z.db`
-- `/home/deploy/judge-helper/backend/data/backups/jobs-20260917T221550.809420Z.db`
-- `/home/deploy/judge-helper-release-backups/source-20260917T221454Z.tar.gz`
+- `/home/deploy/judgehelper/backend/data/backups/predeploy-20260917T221454Z.db`
+- `/home/deploy/judgehelper/backend/data/backups/jobs-20260917T221550.809420Z.db`
+- `/home/deploy/judgehelper-release-backups/source-20260917T221454Z.tar.gz`
 
 Системные файлы hostname также сохранены с суффиксом
 `before-serv-20260917T222814Z` в `/etc` и `/etc/cloud`.
@@ -116,9 +116,9 @@
 
 ```bash
 ssh serv
-cd /srv/judge-helper
+cd /srv/judgehelper
 docker compose ps
-docker compose logs -f judge-helper
+docker compose logs -f judgehelper
 ./scripts/deploy.sh
 ```
 

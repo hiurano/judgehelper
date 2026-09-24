@@ -5,7 +5,7 @@ Description=Daily Judge Helper SQLite backup
 OnCalendar=daily
 RandomizedDelaySec=1h
 Persistent=true
-Unit=judge-helper-backup.service
+Unit=judgehelper-backup.service
 
 [Install]
 WantedBy=timers.target
