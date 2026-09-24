@@ -47,7 +47,7 @@ def test_apply_updates_reports_nothing_when_the_value_already_matches():
 
 
 def test_main_preserves_the_file_and_never_prints_the_secrets(tmp_path, capsys):
-    env_file = tmp_path / "judge-helper.env"
+    env_file = tmp_path / "judgehelper.env"
     env_file.write_text("SECRET_KEY=do-not-print\nCADDY_DOMAIN=old\n", encoding="utf-8")
     env_file.chmod(0o640)
     inode = env_file.stat().st_ino
@@ -59,7 +59,7 @@ def test_main_preserves_the_file_and_never_prints_the_secrets(tmp_path, capsys):
     assert env_file.stat().st_ino == inode
     assert env_file.stat().st_mode & 0o777 == 0o640
 
-    backups = list(tmp_path.glob("judge-helper.env.*.bak"))
+    backups = list(tmp_path.glob("judgehelper.env.*.bak"))
     assert len(backups) == 1
     assert backups[0].stat().st_mode & 0o777 == 0o640
 

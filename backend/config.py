@@ -22,7 +22,7 @@ logging.basicConfig(
     ],
     force=True,
 )
-log = logging.getLogger("judge-helper")
+log = logging.getLogger("judgehelper")
 
 try:
     from dotenv import load_dotenv

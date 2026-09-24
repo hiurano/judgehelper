@@ -1,4 +1,4 @@
-# JudgeHelper [![CI Test Suite](https://github.com/hiurano/judge-helper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hiurano/judge-helper/actions/workflows/ci.yml)
+# JudgeHelper [![CI Test Suite](https://github.com/hiurano/judgehelper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hiurano/judgehelper/actions/workflows/ci.yml)
 
 Веб-сервис автоматического распознавания устной речи и генерации официальных судебных протоколов по стандарту Нижневартовского городского суда ХМАО-Югры.
 
@@ -109,27 +109,27 @@ Content-Security-Policy `default-src 'self'` — интерфейс не заг�
 ## Управление пользователями (CLI)
 
 Аккаунты хранятся в SQLite; пароли защищены PBKDF2-HMAC-SHA256 с индивидуальной солью. Управлять ими можно без перезапуска сервера через CLI-утилиту. Смена пароля отзывает все ранее выданные сессии пользователя.
-Если приложение запущено через Docker, выполняйте команды внутри контейнера `judge-helper`:
+Если приложение запущено через Docker, выполняйте команды внутри контейнера `judgehelper`:
 
 ```bash
 # Список всех пользователей
-docker compose exec judge-helper python -m backend.cli list-users
+docker compose exec judgehelper python -m backend.cli list-users
 
 # Создать нового пользователя
-docker compose exec judge-helper python -m backend.cli add-user username --display-name "Имя"
+docker compose exec judgehelper python -m backend.cli add-user username --display-name "Имя"
 
 # Сменить пароль
-docker compose exec judge-helper python -m backend.cli change-password username
+docker compose exec judgehelper python -m backend.cli change-password username
 
 # Удалить пользователя вместе с его протоколами (требует подтверждения --yes)
-docker compose exec judge-helper python -m backend.cli delete-user username --yes
+docker compose exec judgehelper python -m backend.cli delete-user username --yes
 ```
 
 Задачи привязаны к имени пользователя, поэтому удаление аккаунта удаляет и его
 протоколы: иначе они достались бы следующему аккаунту с тем же именем. Без
 `--yes` команда покажет число сохранённых протоколов и ничего не тронет.
 
-*При локальном запуске (без Docker) просто опускайте `docker compose exec judge-helper`.*
+*При локальном запуске (без Docker) просто опускайте `docker compose exec judgehelper`.*
 
 ## Правка системного промпта
 
@@ -143,10 +143,10 @@ docker compose exec judge-helper python -m backend.cli delete-user username --ye
 
 ```bash
 # Безопасно: перезапись на месте, hot-reload срабатывает сразу
-cat новый-промпт.md > /etc/judge-helper/system-protocol.md
+cat новый-промпт.md > /etc/judgehelper/system-protocol.md
 
 # В vim — отключить создание нового файла при сохранении
-vim -c 'set nobackup nowritebackup noswapfile' /etc/judge-helper/system-protocol.md
+vim -c 'set nobackup nowritebackup noswapfile' /etc/judgehelper/system-protocol.md
 ```
 
 Если файл всё же был заменён, `./scripts/deploy.sh` это заметит: он сверяет

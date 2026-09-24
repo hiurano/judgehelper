@@ -19,7 +19,7 @@
 		-Server
 	}
 
-	reverse_proxy judge-helper:8000
+	reverse_proxy judgehelper:8000
 }
 
 www.{$CADDY_DOMAIN} {
