@@ -4,7 +4,7 @@ import shutil
 import tempfile
 
 
-_test_dir = tempfile.mkdtemp(prefix="judge-helper-tests-")
+_test_dir = tempfile.mkdtemp(prefix="judgehelper-tests-")
 os.environ["DB_PATH"] = os.path.join(_test_dir, "tests.db")
 os.environ["LOGS_DIR"] = os.path.join(_test_dir, "logs")
 os.environ["AUTH_USERNAME"] = "test"

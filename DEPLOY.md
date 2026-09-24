@@ -12,11 +12,11 @@
 * **Репозиторий:** `origin main` (GitHub)
 * **SSH alias:** `serv`
 * **Пользователь SSH:** `deploy`
-* **Каталог проекта:** `/srv/judge-helper`
-* **Конфигурация:** `/etc/judge-helper`
-* **Данные:** `/var/lib/judge-helper`
-* **Логи:** `/var/log/judge-helper`
-* **Резервные копии:** `/var/backups/judge-helper`
+* **Каталог проекта:** `/srv/judgehelper`
+* **Конфигурация:** `/etc/judgehelper`
+* **Данные:** `/var/lib/judgehelper`
+* **Логи:** `/var/log/judgehelper`
+* **Резервные копии:** `/var/backups/judgehelper`
 
 ---
 
@@ -49,7 +49,7 @@ git push origin main
 
 2. **Перейти в папку проекта:**
    ```bash
-   cd /srv/judge-helper
+   cd /srv/judgehelper
    ```
 
 3. **Стянуть последние изменения с GitHub:**
@@ -69,26 +69,26 @@ git push origin main
 После подключения по SSH можно запустить всё сразу одной строкой:
 
 ```bash
-cd /srv/judge-helper && git pull --ff-only origin main && ./scripts/deploy.sh
+cd /srv/judgehelper && git pull --ff-only origin main && ./scripts/deploy.sh
 ```
 
 Первичная структура production создаётся администратором один раз:
 
 ```bash
-install -d -o root -g judge-helper -m 0750 /etc/judge-helper
-install -d -o judge-helper -g judge-helper -m 0770 \
-  /var/lib/judge-helper /var/log/judge-helper /var/backups/judge-helper
+install -d -o root -g judgehelper -m 0750 /etc/judgehelper
+install -d -o judgehelper -g judgehelper -m 0770 \
+  /var/lib/judgehelper /var/log/judgehelper /var/backups/judgehelper
 ```
 
-Файл `/srv/judge-helper/.env` является ссылкой на
-`/etc/judge-helper/judge-helper.env` (`root:judge-helper`, mode `640`).
+Файл `/srv/judgehelper/.env` является ссылкой на
+`/etc/judgehelper/judgehelper.env` (`root:judgehelper`, mode `640`).
 
 Менять значения в этом файле руками не нужно — для этого есть скрипт, который
 сам снимает резервную копию, сохраняет владельца и права и проверяет результат
 через `preflight`:
 
 ```bash
-cd /srv/judge-helper
+cd /srv/judgehelper
 ./scripts/set-config.sh CADDY_DOMAIN=example.ru BASE_URL=https://example.ru
 ```
 
@@ -99,9 +99,9 @@ cd /srv/judge-helper
 (`passwd -S deploy` → `L`), поэтому `sudo` из-под неё не работает вообще, а
 пароль root не задан — вход в VNC-консоль HOSTKEY как `root` тоже не проходит.
 Изменить файлы, принадлежащие root (включая
-`/etc/judge-helper/judge-helper.env`), можно двумя путями: сбросить root-пароль
+`/etc/judgehelper/judgehelper.env`), можно двумя путями: сбросить root-пароль
 в панели HOSTKEY, либо воспользоваться тем, что `deploy` состоит в группе
-`docker`, и запустить контейнер с примонтированным `/etc/judge-helper`. Второй
+`docker`, и запустить контейнер с примонтированным `/etc/judgehelper`. Второй
 способ работает без перезагрузки, но стоит помнить, что членство в группе
 `docker` равносильно root: права `640` на env-файле защищают его от приложения
 и посторонних, но не от самого `deploy`.
@@ -109,28 +109,37 @@ cd /srv/judge-helper
 Скрипт `deploy.sh` перед обновлением:
 
 1. проверяет обязательные секреты, домен, права на `.env` и каталоги данных;
-2. создаёт согласованную резервную копию SQLite в `/var/backups/judge-helper/`;
+2. создаёт согласованную резервную копию SQLite в `/var/backups/judgehelper/`;
 3. проверяет конфигурацию Compose, пересобирает контейнеры и ждёт успешного `/ready`;
 4. если `/ready` так и не ответил — печатает логи и **возвращает предыдущий образ**.
 
-Перед пересборкой скрипт помечает тегом `judge-helper:rollback` тот образ, с
+Перед пересборкой скрипт помечает тегом `judgehelper:rollback` тот образ, с
 которого сейчас работает контейнер. Если новая сборка не проходит проверку
 готовности, этот тег возвращается на место и контейнеры пересоздаются из него.
 Худший исход неудачного деплоя — «осталась предыдущая версия», а не «сайта нет».
+Если запущен уже тот же коммит, который деплоится (повторный запуск без новых
+изменений), тег `judgehelper:rollback` не перезаписывается: сборка не
+воспроизводима побайтно, и иначе откат указывал бы на тот же код. Коммит
+сравнивается по метке образа `org.opencontainers.image.revision`.
 Код возврата в этом случае всё равно ненулевой: деплой не состоялся.
+
+Docker-логи обоих контейнеров ограничены: `json-file`, до пяти файлов по 20 MB.
+Имя Compose-проекта зафиксировано в `docker-compose.yml` (`name: judgehelper`),
+поэтому тома `judgehelper_caddy_data` и `judgehelper_caddy_config` (в них TLS-
+сертификаты Caddy) не зависят от имени каталога.
 
 Откат образа не трогает базу данных — её восстановление остаётся ручным (см.
 раздел ниже).
 
-Всё содержимое `/var/lib/judge-helper` обязано принадлежать `APP_UID:APP_GID`
-(`999:989`, пользователь `judge-helper`). Это касается не только `jobs.db`, но и
+Всё содержимое `/var/lib/judgehelper` обязано принадлежать `APP_UID:APP_GID`
+(`999:989`, пользователь `judgehelper`). Это касается не только `jobs.db`, но и
 служебных файлов SQLite `jobs.db-wal` и `jobs.db-shm`: их создаёт тот процесс,
 который открыл базу, и если они останутся от другого пользователя, приложение
 не сможет открыть базу вообще — падение выглядит как `unable to open database
 file` и бесконечный рестарт контейнера. Поэтому `deploy.sh` снимает
 предварительную копию не от имени того, кто его запустил, а от сервисного
 аккаунта — в контейнере с `--user APP_UID:APP_GID`, как это делает и
-`judge-helper-backup.service`. `preflight` отдельно проверяет владельца обоих
+`judgehelper-backup.service`. `preflight` отдельно проверяет владельца обоих
 служебных файлов и останавливает деплой до пересборки.
 
 Если такие файлы всё же остались от чужого пользователя, приложение чинится
@@ -138,18 +147,18 @@ file` и бесконечный рестарт контейнера. Поэто�
 
 ```bash
 docker compose down
-ls -lan /var/lib/judge-helper/          # убедиться, что jobs.db-wal нулевой
-rm -f /var/lib/judge-helper/jobs.db-wal /var/lib/judge-helper/jobs.db-shm
+ls -lan /var/lib/judgehelper/          # убедиться, что jobs.db-wal нулевой
+rm -f /var/lib/judgehelper/jobs.db-wal /var/lib/judgehelper/jobs.db-shm
 docker compose up -d
 ```
 
 Ненулевой `jobs.db-wal` удалять нельзя — в нём незакоммиченные транзакции.
 
-Ежедневный backup выполняет `judge-helper-backup.timer`. Проверка расписания:
+Ежедневный backup выполняет `judgehelper-backup.timer`. Проверка расписания:
 
 ```bash
-systemctl list-timers judge-helper-backup.timer
-journalctl -u judge-helper-backup.service --since today
+systemctl list-timers judgehelper-backup.timer
+journalctl -u judgehelper-backup.service --since today
 ```
 
 ---
@@ -184,7 +193,7 @@ gh workflow run "CI Test Suite" --ref main
 Строка в `authorized_keys` выглядит так (одной строкой):
 
 ```
-command="cd /srv/judge-helper && git pull --ff-only origin main && ./scripts/deploy.sh",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding ssh-ed25519 AAAA... github-actions-deploy@judge-helper
+command="cd /srv/judgehelper && git pull --ff-only origin main && ./scripts/deploy.sh",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding ssh-ed25519 AAAA... github-actions-deploy@judgehelper
 ```
 
 Если деплой упал — смотрите лог job. Благодаря откату в `deploy.sh` красный
@@ -197,7 +206,7 @@ command="cd /srv/judge-helper && git pull --ff-only origin main && ./scripts/dep
 
 * **Просмотр живых логов бэкенда:**
   ```bash
-  docker compose logs -f judge-helper
+  docker compose logs -f judgehelper
   ```
   *(для выхода из логов нажмите `Ctrl + C`)*
 
@@ -233,14 +242,14 @@ command="cd /srv/judge-helper && git pull --ff-only origin main && ./scripts/dep
 Конфигурация Caddy лежит в `deploy/caddy/Caddyfile` и монтируется в контейнер
 только для чтения. Апекс проксируется на приложение, `www` отдаёт постоянный
 редирект на апекс. Имя хоста подставляется из `CADDY_DOMAIN`, поэтому смена
-домена сводится к правке `/etc/judge-helper/judge-helper.env`.
+домена сводится к правке `/etc/judgehelper/judgehelper.env`.
 
 Сертификат Let's Encrypt Caddy выпускает сам при первом запуске и продлевает
 автоматически; состояние ACME хранится в томе `caddy_data` и переживает
 пересборку. Для выпуска нужны открытые порты 80 и 443 и уже распространившиеся
 DNS-записи.
 
-При смене домена в `/etc/judge-helper/judge-helper.env` меняются две строки
+При смене домена в `/etc/judgehelper/judgehelper.env` меняются две строки
 (`preflight` требует, чтобы они совпадали):
 
 ```
@@ -265,15 +274,15 @@ docker compose logs caddy | grep -i "certificate obtained"
 ## Откат базы данных
 
 Перед каждым запуском `deploy.sh` база автоматически копируется в
-`/var/backups/judge-helper/jobs-<UTC-время>.db`. Если после обновления требуется откат:
+`/var/backups/judgehelper/jobs-<UTC-время>.db`. Если после обновления требуется откат:
 
 ```bash
 docker compose down
-cp /var/lib/judge-helper/jobs.db /var/lib/judge-helper/jobs.failed.db
-cp /var/backups/judge-helper/jobs-<UTC-время>.db /var/lib/judge-helper/jobs.db
+cp /var/lib/judgehelper/jobs.db /var/lib/judgehelper/jobs.failed.db
+cp /var/backups/judgehelper/jobs-<UTC-время>.db /var/lib/judgehelper/jobs.db
 docker compose up -d
 curl -i https://judgehelper.ru/ready
 ```
 
-Подставьте имя нужной копии из `/var/backups/judge-helper/`. Файл `jobs.failed.db`
+Подставьте имя нужной копии из `/var/backups/judgehelper/`. Файл `jobs.failed.db`
 сохраняется для разбора и не удаляется автоматически.
