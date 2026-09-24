@@ -16,8 +16,11 @@ BOLD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
 SIG_PATTERN = re.compile(
     r"^(Председательствующий|Секретарь(?: судебного заседания)?|Помощник судьи)(?:\s+|(?=[А-ЯЁ]))(.+)$"
 )
-CITY_CHECK_PATTERN = re.compile(r"^г\.\s*Нижневартовск(?:\s+.*)?$", re.IGNORECASE)
-CITY_DATE_MATCH_PATTERN = re.compile(r"^(г\.\s*Нижневартовск)(?:\s+|\t+)(.+)$", re.IGNORECASE)
+# "г. <Город>" optionally followed by a date: "г. Сургут\t12 мая 2026 года".
+_CITY = r"г\.\s*[А-ЯЁ][А-ЯЁа-яё]*(?:-[А-ЯЁа-яё]+)*(?:\s+[А-ЯЁ][А-ЯЁа-яё]*(?:-[А-ЯЁа-яё]+)*)?"
+_DATE = r"[«\"]?\d.*"
+CITY_CHECK_PATTERN = re.compile(rf"^{_CITY}(?:\s+{_DATE})?$")
+CITY_DATE_MATCH_PATTERN = re.compile(rf"^({_CITY})\s+({_DATE})$")
 SPACES_TO_TAB_PATTERN = re.compile(r" {4,}")
 
 
@@ -98,7 +101,7 @@ def render_docx(text: str) -> bytes:
             line = f"{role}\t{name}"
             stripped = line.strip()
 
-        # Handle "г. Нижневартовск [дата]" line in header — force right tab stop for date
+        # Handle "г. <Город> [дата]" line in header — force right tab stop for date
         if CITY_CHECK_PATTERN.match(stripped):
             city_date_match = CITY_DATE_MATCH_PATTERN.match(stripped)
             if city_date_match:

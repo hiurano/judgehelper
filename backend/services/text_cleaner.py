@@ -14,9 +14,6 @@ RAW_TRANSCRIPT_FIXES: list[tuple[str, str, int]] = [
     (r"\bУ\s*ПКРС\b",                              "УПК РФ",            re.IGNORECASE),
     (r"\bгосударства\s+НКВД\b",                     "государственного обвинителя", re.IGNORECASE),
     (r"\bпрофессиональн(ые|ых|ым|ыми)\s+издержк",   r"процессуальн\1 издержк", re.IGNORECASE),
-    # Common clear typos
-    (r"\bНижневатовск(ий|ого|ому|им|ом)?\b",      r"Нижневартовск\1", re.IGNORECASE),
-    (r"\bНижневарковск(ий|ого|ому|им|ом)?\b",     r"Нижневартовск\1", re.IGNORECASE),
 ]
 
 COMPILED_FIXES: list[tuple[re.Pattern, str]] = [

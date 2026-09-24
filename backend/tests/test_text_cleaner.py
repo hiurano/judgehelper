@@ -12,9 +12,9 @@ def test_clean_transcript_legal_codes():
 
 
 def test_clean_transcript_typos():
-    raw_text = "Заседание проходило в городском суде г. Нижневатовский."
+    raw_text = "Суд взыскивает профессиональные издержки."
     cleaned = clean_transcript(raw_text)
-    assert "Нижневартовский" in cleaned
+    assert "процессуальные издержки" in cleaned
 
 
 def test_clean_transcript_empty():
