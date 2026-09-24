@@ -43,12 +43,8 @@
             min-width: 320px;
         }
         .logo {
+            display: block;
             width: 64px; height: 64px; margin: 0 auto 1.25rem;
-            background: #AAAAAA; color: #111111;
-            border-radius: 14px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 1.5rem; font-weight: 700;
-            letter-spacing: -0.03em;
         }
         h1 {
             text-align: center; margin: 0 0 0.35rem;
@@ -164,7 +160,7 @@
 <body>
     <div class="login-wrapper">
         <form class="card" method="POST" action="/login" autocomplete="on">
-            <div class="logo">ПС</div>
+            <img class="logo" src="/static/favicon.svg" alt="" width="64" height="64">
             <h1>judgehelper</h1>
             <p class="subtitle">Войдите, чтобы продолжить</p>
             __ERROR__
