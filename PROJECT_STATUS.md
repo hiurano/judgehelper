@@ -5,8 +5,7 @@
 ## Текущее состояние
 
 - Production URL: `https://judgehelper.ru`
-- Сервер: `serv` (`82.40.57.223`), SSH: `ssh serv`
-- Tailscale: `serv.taile2b2a7.ts.net`
+- Сервер: `serv`, SSH: `ssh serv`
 - Пользователь deployment: `deploy`
 - Код: `/srv/judgehelper` (полноценный read-only deploy-key Git checkout)
 - Конфигурация: `/etc/judgehelper`

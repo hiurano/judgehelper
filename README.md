@@ -1,6 +1,6 @@
 # JudgeHelper [![CI Test Suite](https://github.com/hiurano/judgehelper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hiurano/judgehelper/actions/workflows/ci.yml)
 
-Веб-сервис автоматического распознавания устной речи и генерации официальных судебных протоколов по стандарту Нижневартовского городского суда ХМАО-Югры.
+Веб-сервис автоматического распознавания устной речи и генерации официальных судебных протоколов по стандарту делопроизводства суда.
 
 ---
 
