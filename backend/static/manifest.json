@@ -1,6 +1,6 @@
 {
-  "name": "Помощник секретаря",
-  "short_name": "Протокол",
+  "name": "judgehelper",
+  "short_name": "judgehelper",
   "description": "Аудиозапись заседания → черновик протокола",
   "start_url": "/",
   "scope": "/",

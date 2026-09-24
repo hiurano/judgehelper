@@ -813,7 +813,7 @@ function downloadTxt(text, filename) {
 // =========================================================================
 // Completion Notifications (KISS Sound & Tab Title)
 // =========================================================================
-let originalTitle = document.title || 'Помощник секретаря';
+let originalTitle = document.title || 'judgehelper';
 
 function playCompletionChime() {
     try {
