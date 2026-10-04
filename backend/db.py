@@ -172,6 +172,19 @@ class JobStore:
                 "CREATE INDEX IF NOT EXISTS idx_jobs_user_status "
                 "ON jobs(user_id, status, duration_sec)"
             )
+            # Large source/review artifacts are loaded only by the review API.
+            # A trigger also covers deletion from maintenance/older binaries
+            # whose SQLite connection does not enable foreign keys.
+            conn.execute("""CREATE TABLE IF NOT EXISTS protocol_reviews (
+                job_id TEXT PRIMARY KEY REFERENCES jobs(id),
+                source TEXT NOT NULL,
+                state TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 0
+            )""")
+            conn.execute("""CREATE TRIGGER IF NOT EXISTS delete_protocol_review
+                AFTER DELETE ON jobs BEGIN
+                    DELETE FROM protocol_reviews WHERE job_id = OLD.id;
+                END""")
 
     @contextmanager
     def _conn(self):
@@ -431,6 +444,57 @@ class JobStore:
                 (user_id,),
             ).fetchone()
         return int(row[0])
+
+    def get_review(self, job_id: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT source, state, revision FROM protocol_reviews WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        return {"source": json.loads(row[0]), "state": json.loads(row[1]), "revision": row[2]} if row else None
+
+    def create_review(self, job_id: str, source: dict, state: dict) -> bool:
+        """Checkpoint an immutable source before the first LLM request."""
+        with self._lock, self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone():
+                return False
+            stored = conn.execute("SELECT source FROM protocol_reviews WHERE job_id = ?", (job_id,)).fetchone()
+            if stored:
+                if json.loads(stored[0]) != source:
+                    raise ValueError("The original transcript cannot be replaced")
+                return True
+            conn.execute("INSERT INTO protocol_reviews(job_id, source, state) VALUES (?, ?, ?)",
+                         (job_id, json.dumps(source, ensure_ascii=False), json.dumps(state, ensure_ascii=False)))
+        return True
+
+    def save_review(self, job_id: str, state: dict, revision: int,
+                    job_updates: Optional[dict] = None, max_active: Optional[int] = None) -> bool:
+        """Compare-and-swap the review and its rendered job in one transaction.
+
+        False means deletion or a stale browser/worker. Retry slot reservation
+        shares this transaction, so concurrent requests cannot exceed the cap.
+        """
+        with self._lock, self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("""SELECT j.data, j.draft, r.revision FROM jobs j
+                JOIN protocol_reviews r ON r.job_id = j.id WHERE j.id = ?""", (job_id,)).fetchone()
+            if not row or row[2] != revision:
+                return False
+            job = self._rejoin(row[0], row[1])
+            if max_active is not None:
+                count = conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id = ? AND status = 'processing'",
+                                     (job["user_id"],)).fetchone()[0]
+                if count >= max_active:
+                    raise ValueError("Достигнут лимит активных задач")
+            job.update(job_updates or {})
+            rest, draft = _split_draft(job)
+            conn.execute("UPDATE protocol_reviews SET state = ?, revision = revision + 1 WHERE job_id = ?",
+                         (json.dumps(state, ensure_ascii=False), job_id))
+            conn.execute("""UPDATE jobs SET data = ?, draft = ?, status = ?,
+                duration_sec = ?, updated_at = ? WHERE id = ?""",
+                         (json.dumps(rest, ensure_ascii=False), draft, job.get("status"),
+                          duration_seconds(job), int(time.time()), job_id))
+        return True
 
     def create_if_under_active_limit(
         self, job_id: str, data: dict, max_active: int

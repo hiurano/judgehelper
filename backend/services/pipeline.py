@@ -15,6 +15,7 @@ from backend.services.llm import (
 )
 from backend.services.text_cleaner import clean_transcript, format_metadata_block
 from backend.services.task_manager import spawn
+from backend.services.review_pipeline import process_review
 
 
 class JobGone(Exception):
@@ -33,7 +34,7 @@ def job_age_seconds(item: dict, now: int) -> int:
     Deliberately not `updated_at`: the polling loop writes the transcription
     service's status back on every pass, so a job wedged on that service's side
     looks freshly touched for ever."""
-    started = item.get("created_at") or item.get("aai_started_at") or now
+    started = item.get("review_attempt_started_at") or item.get("created_at") or item.get("aai_started_at") or now
     try:
         return max(0, now - int(started))
     except (TypeError, ValueError):
@@ -101,6 +102,9 @@ async def process_transcript(job_id: str):
             aai_transcript_id = existing.get("aai_transcript_id") or job_id
 
             try:
+                if existing.get("protocol_mode") == "review":
+                    await process_review(job_id, existing, get_shared_client())
+                    return
                 existing.update({
                     "status": "processing",
                     "phase": existing.get("phase", "processing"),

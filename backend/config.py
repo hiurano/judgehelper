@@ -50,6 +50,10 @@ def parse_origins(raw: str) -> list[str]:
 
 ALLOWED_ORIGINS = parse_origins(os.environ.get("ALLOWED_ORIGINS", ""))
 MODEL = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
+# Captured on each new upload; existing jobs keep their original pipeline.
+PROTOCOL_MODE = os.environ.get("PROTOCOL_MODE", "legacy")
+if PROTOCOL_MODE not in ("legacy", "review"):
+    raise ValueError("PROTOCOL_MODE must be legacy or review")
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
