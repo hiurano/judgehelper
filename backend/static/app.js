@@ -275,6 +275,8 @@ function pollQueueItem(item) {
             }
             const data = await resp.json();
             if (item.cancelRequested || item.removed) return;
+            item.has_review = data.has_review;
+            item.review_status = data.review_status;
             if (data.status === 'done') {
                 if (item.pollTimer) clearInterval(item.pollTimer);
                 item.status = 'done';
@@ -540,6 +542,7 @@ function getJobSteps(item) {
     let s4 = { title: 'Сборка документа Word', state: 'pending' };
     if (isDone) {
         s4.state = 'completed';
+        if (item.has_review) s4.title = 'Готово к проверке';
     }
 
     return [s1, s2, s3, s4];
@@ -612,7 +615,14 @@ function renderQueueItem(item) {
     head.appendChild(metaSpan);
 
     // Header Right Actions:
-    if (isDone) {
+    if (item.has_review && (isDone || isErr)) {
+        const reviewBtn = document.createElement('button');
+        reviewBtn.className = 'queue-download-pill';
+        reviewBtn.textContent = 'Проверить протокол';
+        reviewBtn.addEventListener('click', () => openProtocolReview(item.jobId));
+        head.appendChild(reviewBtn);
+    }
+    if (isDone && !item.has_review) {
         // Native Apple Style Download Pill Button in Header
         const dlBtn = document.createElement('button');
         dlBtn.className = 'queue-download-pill';
@@ -970,7 +980,7 @@ async function loadHistoryJobs() {
         const data = await resp.json();
         const allJobs = (data.jobs || []).filter(job => !cancelledJobIds.has(job.id));
         
-        historyJobs = allJobs.filter((j) => j.status === 'done');
+        historyJobs = allJobs.filter((j) => j.status === 'done' || (j.has_review && j.status === 'error'));
         renderHistory();
 
         // Auto-resume active/processing jobs upon page load or reload
@@ -1039,7 +1049,9 @@ function renderHistory() {
             ? new Date(job.updated_at * 1000).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
             : '';
         const durStr = job.duration_min ? `${job.duration_min} мин` : '';
-        const warnStr = job.truncated ? 'возможно неполный' : '';
+        const warnStr = job.has_review
+            ? (job.review_status === 'reviewed' ? 'проверен' : job.review_status === 'error' ? 'анализ не завершён' : 'требует проверки')
+            : job.truncated ? 'возможно неполный' : '';
         metaEl.textContent = [durStr, dateStr, warnStr].filter(Boolean).join(' · ');
 
         contentEl.appendChild(titleEl);
@@ -1072,6 +1084,7 @@ function renderHistory() {
         dlItemBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             dropdownMenu.hidden = true;
+            if (job.has_review) { openProtocolReview(job.id); return; }
             const draft = job.draft || await fetchDraft(job.id);
             if (!draft) {
                 alert('Не удалось загрузить текст протокола. Проверьте соединение.');
@@ -1080,6 +1093,15 @@ function renderHistory() {
             job.draft = draft;
             await downloadDocx(draft, nameText);
         });
+
+        if (job.has_review) {
+            dlItemBtn.textContent = 'Проверить протокол';
+            const reviewBtn = document.createElement('button');
+            reviewBtn.className = 'queue-download-pill';
+            reviewBtn.textContent = 'Проверить';
+            reviewBtn.addEventListener('click', () => openProtocolReview(job.id));
+            contentEl.appendChild(reviewBtn);
+        }
 
         const delItemBtn = document.createElement('button');
         delItemBtn.className = 'item-dropdown-btn danger';

@@ -41,6 +41,7 @@ from backend.config import (
     MAX_RENDER_TEXT_CHARS,
     MAX_UPLOAD_BYTES,
     OPENROUTER_KEY,
+    PROTOCOL_MODE,
     SECRET_KEY,
     STATIC_DIR,
     WEBHOOK_SECRET,
@@ -53,6 +54,7 @@ from backend.services.http_client import close_shared_client
 from backend.services.pipeline import process_transcript, recover_pending_jobs
 from backend.services.transcription import aai_polling_loop, submit_to_assemblyai
 from backend.services.task_manager import cancel_all, cancel_job, spawn
+from backend.review_api import router as review_router
 
 
 def _looks_like_supported_media(header: bytes) -> bool:
@@ -200,6 +202,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Judge Helper", docs_url="/api/docs", lifespan=lifespan)
+app.include_router(review_router)
 
 
 # --- Middleware ---------------------------------------------------------
@@ -209,7 +212,7 @@ class NoCacheMiddleware:
 
     async def __call__(self, scope, receive, send):
         no_cache = scope["type"] == "http" and (
-            scope.get("path", "").startswith("/static/") or scope.get("path") == "/"
+            scope.get("path", "").startswith(("/static/", "/jobs/")) or scope.get("path") == "/"
         )
 
         async def send_with_headers(message):
@@ -310,6 +313,7 @@ def reserve_upload(user_id: str, phase: str) -> tuple[str, dict]:
     initial_job = {
         "status": "processing", "phase": phase,
         "created_at": int(time.time()), "user_id": user_id,
+        "protocol_mode": PROTOCOL_MODE,
     }
     if not jobs.create_if_under_active_limit(job_id, initial_job, MAX_ACTIVE_JOBS_PER_USER):
         raise HTTPException(429, f"Достигнут лимит активных задач ({MAX_ACTIVE_JOBS_PER_USER}). Дождитесь завершения обработки.")
@@ -440,6 +444,10 @@ async def aai_webhook(payload: dict, x_webhook_secret: Optional[str] = Header(No
         log.warning(f"Webhook received for unknown transcript_id: {transcript_id}")
         return {"ok": False, "reason": "job not found"}
 
+    if existing.get("has_review"):
+        # A late provider event cannot invalidate a checkpoint or human review.
+        return {"ok": True}
+
     if status_val == "error":
         existing.update({"status": "error", "error": "AssemblyAI transcription failed"})
         jobs.update_if_exists(job_id, existing)
@@ -502,6 +510,8 @@ async def list_jobs(request: Request):
             # the whole protocol, and this list is reloaded on every tab focus.
             # `list_recent` reports this from its own column without reading it.
             "has_draft": bool(item.get("has_draft")),
+            "has_review": bool(item.get("has_review")),
+            "review_status": item.get("review_status"),
             "truncated": bool(item.get("truncated")),
             "error": item.get("error") if item.get("status") == "error" else None,
         })

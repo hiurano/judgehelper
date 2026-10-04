@@ -4,6 +4,7 @@ Install requirements-browser.txt and run `playwright install chromium`, then
 `pytest browser_tests`. The browser uses fake audio; all HTTP APIs are mocked.
 """
 import json
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -19,7 +20,7 @@ def ui():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(args=[
             '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream',
-        ])
+        ], executable_path=os.environ.get('CHROMIUM_EXECUTABLE'))
         context = browser.new_context(permissions=['microphone'])
         state = {'owner': 'account-a', 'upload_status': 200, 'uploads': 0, 'reservations': 0, 'jobs': {}}
 

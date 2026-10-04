@@ -54,6 +54,51 @@ def _apply_run_font(run, bold: bool = False):
         rfonts.set(qn(slot), "Times New Roman")
 
 
+def _new_document():
+    doc = Document()
+    style = doc.styles["Normal"]
+    style.font.name = "Times New Roman"
+    style.font.size = Pt(12)
+    rpr = style.element.get_or_add_rPr()
+    rfonts = rpr.find(qn("w:rFonts"))
+    if rfonts is None:
+        rfonts = OxmlElement("w:rFonts")
+        rpr.insert(0, rfonts)
+    for slot in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+        rfonts.set(qn(slot), "Times New Roman")
+    for section in doc.sections:
+        section.top_margin = Cm(2.0)
+        section.bottom_margin = Cm(2.0)
+        section.left_margin = Cm(3.0)
+        section.right_margin = Cm(1.5)
+    return doc
+
+
+def render_review_docx(blocks: list[dict]) -> bytes:
+    """Render the same blocks the review screen displays, without text heuristics.
+
+    Speech containing Markdown, 'ПРОТОКОЛ' or signature-like phrases stays
+    literal speech. Only typed template blocks control document formatting.
+    """
+    doc = _new_document()
+    for block in blocks:
+        p = doc.add_paragraph()
+        fmt = p.paragraph_format
+        fmt.space_before = fmt.space_after = Pt(0)
+        fmt.line_spacing = 1.0
+        fmt.first_line_indent = Cm(1.25 if block["kind"] == "utterance" else 0)
+        fmt.alignment = WD_ALIGN_PARAGRAPH.CENTER if block["kind"] == "title" else WD_ALIGN_PARAGRAPH.JUSTIFY
+        if block["kind"] == "utterance":
+            _apply_run_font(p.add_run(block["label"] + ": "), bold=True)
+        _apply_run_font(p.add_run(block["text"]), bold=block["kind"] == "title")
+        if block["kind"] == "signature":
+            width = doc.sections[0].page_width - doc.sections[0].left_margin - doc.sections[0].right_margin
+            fmt.tab_stops.add_tab_stop(width, WD_TAB_ALIGNMENT.RIGHT)
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
 def render_docx(text: str) -> bytes:
     """
     Render protocol text as a .docx with exact Russian court document formatting:
@@ -66,25 +111,7 @@ def render_docx(text: str) -> bytes:
     - Converts markdown **bold** into native Word bold runs
     - Automatically formats signatures nicely with right-aligned tabs
     """
-    doc = Document()
-
-    # Base style: Times New Roman 12pt
-    style = doc.styles["Normal"]
-    style.font.name = "Times New Roman"
-    style.font.size = Pt(12)
-    rpr = style.element.get_or_add_rPr()
-    rfonts = rpr.find(qn("w:rFonts"))
-    if rfonts is None:
-        rfonts = OxmlElement("w:rFonts")
-        rpr.insert(0, rfonts)
-    for slot in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
-        rfonts.set(qn(slot), "Times New Roman")
-
-    for section in doc.sections:
-        section.top_margin = Cm(2.0)
-        section.bottom_margin = Cm(2.0)
-        section.left_margin = Cm(3.0)
-        section.right_margin = Cm(1.5)
+    doc = _new_document()
 
     lines = text.split("\n")
     for line in lines:

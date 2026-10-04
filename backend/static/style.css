@@ -1,5 +1,29 @@
 [hidden] { display: none !important; }
 
+#protocol-review { width: min(1100px, 96vw); max-height: 92dvh; padding: 1.25rem; color: var(--text-primary); background: var(--bg-card); border: 1px solid var(--border-control); border-radius: 12px; }
+#protocol-review::backdrop { background: rgba(0, 0, 0, .75); }
+.review-heading, .review-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.review-heading { justify-content: space-between; }
+#review-content { overflow-y: auto; max-height: 72dvh; padding: .25rem; }
+#review-content fieldset { border: 0; padding: 0; min-width: 0; }
+#review-content details { padding: .6rem 0; }
+#review-content summary { cursor: pointer; }
+.review-actions { margin: .8rem 0; }
+.review-fields, .review-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.review-fields label { display: grid; gap: .3rem; }
+.review-speaker, .review-utterance { padding: 1rem 0; border-bottom: 1px solid var(--border-control); }
+.review-speaker select, .review-utterance select { margin: .5rem; }
+#review-content input:not([type=checkbox]), #review-content select, #review-content textarea { max-width: 100%; color: var(--text-primary); background: var(--bg-item); border: 1px solid var(--border-control); border-radius: 6px; padding: .55rem; font: inherit; }
+#review-content textarea { width: 100%; resize: vertical; }
+.review-text, .review-paper p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-change, .review-concern { display: block; margin-top: .8rem; padding: .8rem; background: var(--bg-item); border-radius: 6px; }
+.review-change del { color: #ffb0a8; }
+.review-change ins { color: #8cdda4; text-decoration: none; }
+#review-content mark { background: #604821; color: #fff2cd; }
+.review-paper { background: #fff; color: #111; padding: 2rem; font: 12pt/1.5 'Times New Roman', serif; }
+.review-block-title { text-align: center; font-weight: bold; }
+@media (max-width: 650px) { .review-fields, .review-columns { grid-template-columns: 1fr; } }
+
 :root {
     /* Apple Dark Pro Palette */
     --bg-main: #0D0D0D;
