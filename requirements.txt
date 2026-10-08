@@ -5,4 +5,4 @@ httpx==0.28.1
 anyio==4.15.1
 python-multipart==0.0.32
 python-docx==1.2.0
-python-dotenv==1.2.3
+python-dotenv==1.2.4
